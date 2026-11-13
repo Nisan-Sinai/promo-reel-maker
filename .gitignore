@@ -1,0 +1,10 @@
+# render outputs and caches
+*_work/
+*.mp4
+*_cover.jpg
+*_preview.jpg
+*_frame_*.png
+.brief_*.json
+dist/
+__pycache__/
+*.pyc

@@ -1,0 +1,17 @@
+{
+  "out": "demo.mp4",
+  "format": "9x16",
+  "theme": {"preset": "gold", "type": "bold"},
+  "brand": {"name": "צוותים פלוס", "tagline": "כוח אדם מקצועי לבנייה", "initials": "צפ", "phone": "050-123-4567"},
+  "sfx": true,
+  "scenes": [
+    {"type": "hook", "small": "חסרים לך", "big": "פועלים?"},
+    {"type": "stamp", "line": "הפרויקט", "stamp": "נתקע"},
+    {"type": "logo"},
+    {"type": "services", "small": "צוותים של", "per": 1.0, "items": ["טפסנים", "ברזלנים", "ריצוף"]},
+    {"type": "stats", "items": [{"prefix": "מעל", "value": 550, "label": "עובדים מקצועיים"}]},
+    {"type": "checklist", "items": ["מגיעים מהר", "בלי בירוקרטיה", "עומדים בהתחייבויות"]},
+    {"type": "offer", "badge": "התחייבות", "big": "תוך 48 שעות", "small": "צוות מלא באתר שלך"},
+    {"type": "cta", "eyebrow": "מיועד לקבלנים רשומים", "headline": "לקבלת הצעת מחיר", "button": "שלחו הודעה בוואטסאפ"}
+  ]
+}
