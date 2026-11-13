@@ -8,6 +8,7 @@ The engine is embedded inside SKILL.md, so the skill is a single self-contained 
 The build checks that the engine extracted back out of SKILL.md is byte-identical to the source.
 """
 import pathlib
+import unicodedata
 import py_compile
 import zipfile
 
@@ -33,6 +34,10 @@ def main():
     assert tpl.count("{{ENGINE}}") == 1, "template must contain exactly one {{ENGINE}} placeholder"
     md = tpl.replace("{{ENGINE}}", eng)
     assert extract(md) == eng, "engine round-trip mismatch"
+    # Invisible or unassigned characters get dropped when the skill is copied through other tools,
+    # which silently changes the code (this broke is_rtl once). Keep the built file free of them.
+    bad = sorted({f"U+{ord(ch):04X}" for ch in md if unicodedata.category(ch) in ("Cf", "Cn", "Co")})
+    assert not bad, f"invisible/unassigned characters in SKILL.md: {bad}"
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(md, encoding="utf-8")
     DIST.parent.mkdir(parents=True, exist_ok=True)

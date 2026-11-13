@@ -10,7 +10,7 @@ from concurrent.futures import ProcessPoolExecutor
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, features
 
-VERSION = "1.0"
+VERSION = "1.0.1"
 FFMPEG = shutil.which("ffmpeg") or "ffmpeg"
 SR = 48000
 RAQM = features.check("raqm")
@@ -105,7 +105,7 @@ def get_font(spec, size):
 
 
 def is_rtl(s):
-    return any("\u0590" <= c <= "\u05FF" or "\uFB1D" <= c <= "\uFB4F" or "\u0600" <= c <= "\u06FF" for c in s)
+    return any(0x0590 <= ord(c) <= 0x05FF or 0xFB1D <= ord(c) <= 0xFB4F or 0x0600 <= ord(c) <= 0x06FF for c in s)
 
 
 def _kw(s):
