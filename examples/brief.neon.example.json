@@ -1,0 +1,257 @@
+{
+ "out": "nst_results.mp4",
+ "platform": "reels",
+ "brand_kit": "brand_kit.json",
+ "theme": {
+  "preset": "tech",
+  "type": "tech",
+  "bg_style": "tech",
+  "grade": "bright"
+ },
+ "brand": {
+  "website": "nisan-sinai-technologies.vercel.app",
+  "corner_logo": true
+ },
+ "music": {
+  "file": "assets/sfx/music_edit.wav",
+  "volume": 0.8
+ },
+ "sfx": {
+  "whoosh": {
+   "file": "assets/sfx/whoosh.wav",
+   "sync": 0.293,
+   "gain": 0.55
+  },
+  "impact": {
+   "file": "assets/sfx/impact.wav",
+   "sync": 0
+  },
+  "thump": {
+   "file": "assets/sfx/thump.wav",
+   "sync": 0.064,
+   "gain": 0.8
+  },
+  "pop": {
+   "file": "assets/sfx/pop.wav",
+   "sync": 0.054,
+   "gain": 0.7
+  },
+  "click": {
+   "file": "assets/sfx/click.wav",
+   "sync": 0.005,
+   "gain": 0.6
+  },
+  "reveal": {
+   "file": "assets/sfx/reveal.wav",
+   "sync": 0.325,
+   "max": 2.5,
+   "gain": 0.8
+  }
+ },
+ "scenes": [
+  {
+   "type": "kinetic",
+   "lines": [
+    "העסק שלך",
+    "עדיין רץ על",
+    {
+     "text": "אקסל?",
+     "style": "accent"
+    }
+   ],
+   "beats": 4
+  },
+  {
+   "type": "contrast",
+   "transition": "zoom",
+   "items": [
+    {
+     "text": "אקסל",
+     "mark": "x"
+    },
+    {
+     "text": "וואטסאפים",
+     "mark": "x"
+    },
+    {
+     "text": "מערכת אחת",
+     "mark": "check"
+    }
+   ],
+   "prompt": "אני צריך אתר עם הזמנות אונליין",
+   "prompt_at": 0.25,
+   "cps": 16,
+   "caption2": "טכנולוגיה שמסדרת את העסק.",
+   "highlight": [
+    "שמסדרת"
+   ],
+   "caption_size": 62
+  },
+  {
+   "type": "gallery",
+   "device": "laptop",
+   "kicker": "פרויקטים נבחרים",
+   "per": 0.85,
+   "items": [
+    {
+     "src": {
+      "src": "shots/ld_hero.jpg",
+      "focus": [
+       0.6,
+       0.5
+      ]
+     },
+     "label": "אתר ומערכת הזמנות",
+     "tag": "LD Event Design",
+     "icon": "calendar"
+    },
+    {
+     "src": {
+      "src": "shots/ld_form.jpg",
+      "focus": [
+       0.5,
+       0.5
+      ]
+     },
+     "label": "איסוף פניות מהאתר",
+     "tag": "LD Event Design",
+     "icon": "people"
+    },
+    {
+     "src": {
+      "src": "shots/ld_catalog.jpg",
+      "focus": [
+       0.55,
+       0.5
+      ]
+     },
+     "label": "חבילות, פריטים וסל הזמנה",
+     "tag": "LD Event Design",
+     "icon": "cart"
+    },
+    {
+     "src": {
+      "src": "shots/shelyah_hero.jpg",
+      "focus": [
+       0.6,
+       0.5
+      ]
+     },
+     "label": "חנות אונליין",
+     "tag": "Shel-Yah · פרויקט הדגמה",
+     "icon": "cart"
+    },
+    {
+     "src": {
+      "src": "shots/shelyah_products.jpg",
+      "focus": [
+       0.55,
+       0.5
+      ]
+     },
+     "label": "קטלוג וסל קנייה",
+     "tag": "Shel-Yah · פרויקט הדגמה",
+     "icon": "cart"
+    },
+    {
+     "src": {
+      "src": "shots/rsvp_hero.jpg",
+      "focus": [
+       0.6,
+       0.5
+      ]
+     },
+     "label": "פלטפורמת אישורי הגעה",
+     "tag": "מערכת אישורי הגעה",
+     "icon": "calendar"
+    },
+    {
+     "src": {
+      "src": "shots/rsvp_demo.jpg",
+      "focus": [
+       0.5,
+       0.5
+      ]
+     },
+     "label": "דשבורד בזמן אמת",
+     "tag": "מערכת אישורי הגעה",
+     "icon": "chart"
+    }
+   ]
+  },
+  {
+   "type": "wall",
+   "title": "מערכות שכבר עובדות בעולם האמיתי.",
+   "title_size": 84,
+   "title_highlight": [
+    "עובדות"
+   ],
+   "images": [
+    "shots/ld_hero.jpg",
+    "shots/ld_form.jpg",
+    "shots/ld_items.jpg",
+    "shots/ld_catalog.jpg",
+    "shots/shelyah_hero.jpg",
+    "shots/shelyah_products.jpg",
+    "shots/rsvp_hero.jpg",
+    "shots/rsvp_demo.jpg",
+    "shots/nst_hero.jpg",
+    "shots/nst_services.jpg"
+   ],
+   "tile_w": 0.5,
+   "tile_ratio": 0.4525,
+   "cols": 4,
+   "rows": 9,
+   "wall_dim": 0.7,
+   "dur": 3.6
+  },
+  {
+   "type": "bundle",
+   "title": "מה אני בונה",
+   "items": [
+    {
+     "title": "אתרים וחנויות אונליין",
+     "text": "אתרי תדמית, דפי נחיתה וחנויות מהירות",
+     "image": "shots/shelyah_hero.jpg",
+     "tags": [
+      "UX/UI",
+      "E-commerce",
+      "SEO"
+     ]
+    },
+    {
+     "title": "מערכות CRM ו-ERP",
+     "text": "לקוחות, לידים, הזמנות ותפעול במערכת אחת",
+     "image": "shots/rsvp_demo.jpg",
+     "tags": [
+      "Leads",
+      "Operations",
+      "Reports"
+     ]
+    }
+   ]
+  },
+  {
+   "type": "kinetic",
+   "lines": [
+    "אני בונה את",
+    {
+     "text": "הטכנולוגיה",
+     "style": "accent"
+    },
+    "שהעסק שלך צריך."
+   ],
+   "beats": 5
+  },
+  {
+   "type": "cta",
+   "logo": true,
+   "eyebrow": "יש לך רעיון?",
+   "eyebrow_size": 60,
+   "headline": "בואו נבנה משהו מעולה",
+   "headline_size": 100,
+   "button": "שלחו הודעה בוואטסאפ",
+   "beats": 11
+  }
+ ]
+}

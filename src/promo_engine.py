@@ -10,7 +10,8 @@ from concurrent.futures import ProcessPoolExecutor
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, features
 
-VERSION = "3.0.0"
+VERSION = "3.1.0"
+SEED_SALT = "3.0.0"  # frozen: keeps random choices stable across engine versions
 FFMPEG = shutil.which("ffmpeg") or "ffmpeg"
 SR = 48000
 RAQM = features.check("raqm")
@@ -30,6 +31,7 @@ THEMES = {
     "electric": dict(bg="#06122A", primary="#3FE0FF", primary2="#1E5BFF", hi="#D8FAFF", accent="#FF3D71", text="#FFFFFF", muted="#BFD3F2", cta="#25D366"),
     "fresh":    dict(bg="#07140D", primary="#B9F23F", primary2="#22A85A", hi="#F0FFD0", accent="#FF5A36", text="#FFFFFF", muted="#CDE8D2", cta="#25D366"),
     "royal":    dict(bg="#140A26", primary="#FF77DD", primary2="#7B3FF2", hi="#FFE3F7", accent="#FFD166", text="#FFFFFF", muted="#E2D4F7", cta="#25D366"),
+    "neon":     dict(bg="#120B24", primary="#FF8A1F", primary2="#8B5CF6", hi="#FFC680", accent="#C4A1FF", text="#FFFFFF", muted="#B8AED6", cta="#25D366"),
     "tech":     dict(bg="#05070B", primary="#53E4FF", primary2="#8C6CFF", hi="#9AF1FF", accent="#D7C4A0", text="#F5F8FB", muted="#9AA7B7", cta="#25D366"),
     "clean":    dict(bg="#F3F5F9", primary="#1F6FEB", primary2="#0A3A8C", hi="#8FC2FF", accent="#E5484D", text="#0D1321", muted="#46536A", cta="#25D366"),
 }
@@ -890,13 +892,13 @@ def chat_icon(size, color):
     return im
 
 
-def button(ctx, text, color=None):
+def button(ctx, text, color=None, icon=True):
     U = ctx.U
     color = color or ctx.c["cta"]
     m = text_mask(text, ctx.font("heavy", 50))
-    ic = int(m.height * 1.25)
+    ic = int(m.height * 1.25) if icon else 0
     h = int(max(m.height, ic) + 44 * U)
-    w = int(m.width + ic + 26 * U + 80 * U)
+    w = int(m.width + ic + (26 * U if icon else 0) + 80 * U)
     im = Image.new("RGBA", (w, h))
     d = ImageDraw.Draw(im)
     d.rounded_rectangle((0, 0, w - 1, h - 1), h // 2, fill=color)
@@ -910,7 +912,13 @@ def button(ctx, text, color=None):
     rtl = is_rtl(text)
     icx = int(w - 40 * U - ic) if rtl else int(40 * U)
     tx = int(icx - 26 * U - m.width) if rtl else int(icx + ic + 26 * U)
-    im.alpha_composite(chat_icon(ic, (255, 255, 255, 255)), (icx, (h - ic) // 2))
+    if icon:
+        im.alpha_composite(chat_icon(ic, (255, 255, 255, 255)), (icx, (h - ic) // 2))
+    else:
+        tx = (w - m.width) // 2
+    if not icon or ink_for(color) != (255, 255, 255):
+        txt = Image.new("RGBA", m.size, ink_for(color) + (0,))
+        txt.putalpha(m)
     im.alpha_composite(txt, (tx, (h - m.height) // 2))
     return finish(im, im.getchannel("A"), 0.5, U=U)
 
@@ -1805,7 +1813,8 @@ def b_cta(sc, ctx):
         lg = finish(lg, lg.getchannel("A"), 0.5, U=U)
     eb = ctx.T(sc["eyebrow"], "heavy", sc.get("eyebrow_size", 46), grad=True) if sc.get("eyebrow") else None
     hl = ctx.T(sc.get("headline", "לפרטים נוספים"), "heavy", sc.get("headline_size", 92), color=fg, wrap=True)
-    bt = button(ctx, sc.get("button", "שלחו הודעה בוואטסאפ")) if sc.get("button", True) else None
+    bt = button(ctx, sc.get("button", "שלחו הודעה בוואטסאפ"), ctx.c["primary"] if sc.get("button_style") == "primary" else None,
+                icon=sc.get("button_icon", True)) if sc.get("button", True) else None
     ph = ctx.T(sc.get("phone", br.get("phone", "")), "display", 116, grad=True) if (sc.get("phone") or br.get("phone")) else None
     web = ctx.T(sc.get("website", br.get("website")), "body", 44, color=fg) if (sc.get("website") or br.get("website")) else None
     qr = qr_image(ctx, sc["qr"], int(220 * U)) if sc.get("qr") else None
@@ -2469,14 +2478,551 @@ def burst_fx(ctx, cx, cy, t0=0.12, n=28, color=None):
     return Fn(f)
 
 
+# ----------------------------------------------------------------- v3.1: neon tags, prompt bar, contrast, gallery, proof wall, bundle
+def glow_wrap(img, color, U, radius=18, strength=0.9, shadow=0.35):
+    """Pad an RGBA image and add a coloured neon glow (two blur radii) plus a soft drop shadow."""
+    pad = int(radius * 2.2 * U) + 4
+    W_, H_ = img.width + 2 * pad, img.height + 2 * pad
+    a = Image.new("L", (W_, H_))
+    a.paste(img.getchannel("A"), (pad, pad))
+    out = Image.new("RGBA", (W_, H_))
+    if shadow:
+        sh = Image.new("RGBA", (W_, H_), (0, 0, 0, 0))
+        sh.putalpha(a.filter(ImageFilter.GaussianBlur(10 * U)).point(lambda v: int(v * shadow)))
+        out.alpha_composite(sh, (0, int(6 * U)))
+    for r, k in ((radius, strength), (radius * 0.4, strength * 0.8)):
+        gl = Image.new("RGBA", (W_, H_), tuple(color) + (0,))
+        gl.putalpha(a.filter(ImageFilter.GaussianBlur(max(1, r * U))).point(lambda v, k=k: min(255, int(v * k))))
+        out.alpha_composite(gl)
+    out.alpha_composite(img, (pad, pad))
+    return out
+
+
+def mark_img(kind, size, color):
+    """Stroked ✕ or ✓ mark as an RGBA image."""
+    S = max(8, int(size * 4))
+    m = Image.new("L", (S, S))
+    d = ImageDraw.Draw(m)
+    w = max(2, int(S * 0.13))
+    if kind == "x":
+        d.line([(S * 0.2, S * 0.2), (S * 0.8, S * 0.8)], fill=255, width=w)
+        d.line([(S * 0.8, S * 0.2), (S * 0.2, S * 0.8)], fill=255, width=w)
+    else:
+        d.line([(S * 0.12, S * 0.56), (S * 0.4, S * 0.82), (S * 0.9, S * 0.2)], fill=255, width=w, joint="curve")
+    m = m.resize((max(1, int(size)), max(1, int(size))), Image.LANCZOS)
+    im = Image.new("RGBA", m.size, tuple(color) + (0,))
+    im.putalpha(m)
+    return im
+
+
+def neon_pill(ctx, text, mark=None, color=None, size=60):
+    """Neon tag: glowing outline, tinted glass fill, text and an optional ✕/✓ mark at the reading start."""
+    U = ctx.U
+    color = tuple(color or ctx.c["primary2"])
+    tc = tuple(int(c + (255 - c) * 0.35) for c in color)
+    m = line_mask(text, ctx.font("heavy", size))
+    h = int(m.height + 36 * U)
+    mk = int(m.height * 0.62) if mark else 0
+    gap = int(16 * U) if mark else 0
+    padx = int(30 * U)
+    w = m.width + 2 * padx + mk + gap
+    bw = max(2, int(4.5 * U))
+    im = Image.new("RGBA", (w, h))
+    ImageDraw.Draw(im).rounded_rectangle((bw // 2, bw // 2, w - 1 - bw // 2, h - 1 - bw // 2), int(18 * U),
+                                         outline=color + (255,), width=bw,
+                                         fill=(color[0] // 9, color[1] // 9, color[2] // 9, 150))
+    rtl = is_rtl(text)
+    txt = Image.new("RGBA", m.size, tc + (0,))
+    txt.putalpha(m)
+    if mark:
+        mx = w - padx - mk if rtl else padx
+        im.alpha_composite(mark_img(mark, mk, tc), (int(mx), (h - mk) // 2))
+        tx = mx - gap - m.width if rtl else mx + mk + gap
+    else:
+        tx = padx
+    im.alpha_composite(txt, (int(tx), (h - m.height) // 2))
+    return glow_wrap(im, color, U)
+
+
+def rich_text(ctx, text, size=52, role="heavy", color=(255, 255, 255), hl_color=None, highlight=(), max_w=None,
+              align="center"):
+    """Multi-line text as one image; words containing a highlight term (or digits, with highlight="digits") get hl_color."""
+    hl_color = tuple(hl_color or ctx.c["primary"])
+    max_w = max_w or ctx.W * 0.8
+    f = ctx.font(role, size)
+    words = str(text).split()
+    if not words:
+        return Image.new("RGBA", (2, 2))
+    masks = [word_mask(w, f) for w in words]
+    if max(m.width for m in masks) > max_w:
+        f = ctx.font(role, size * max_w / max(m.width for m in masks) * 0.97)
+        masks = [word_mask(w, f) for w in words]
+    sp = f.getlength(" ")
+
+    def split(limit):
+        ls, cur, cw = [], [], 0
+        for w, m in zip(words, masks):
+            if cur and cw + sp + m.width > limit:
+                ls.append(cur)
+                cur, cw = [], 0
+            cur.append((w, m))
+            cw += (sp if cw else 0) + m.width
+        if cur:
+            ls.append(cur)
+        return ls
+    lines = split(max_w)
+    if len(lines) > 1:
+        lo, hi = max(m.width for m in masks), max_w
+        for _ in range(14):
+            mid = (lo + hi) / 2
+            if len(split(mid)) <= len(lines):
+                hi = mid
+            else:
+                lo = mid
+        lines = split(hi + 0.5)
+    lh = int(max(m.height for m in masks) * 0.9)
+    widths = [sum(m.width for _, m in ln) + sp * (len(ln) - 1) for ln in lines]
+    Wt, Ht = int(max(widths)) + 2, lh * (len(lines) - 1) + max(m.height for m in masks)
+    im = Image.new("RGBA", (Wt, Ht))
+    rtl = is_rtl(text)
+    hl = tuple(highlight) if not isinstance(highlight, str) else ()
+    y = 0
+    for ln, lw in zip(lines, widths):
+        x0 = (Wt - lw) / 2 if align == "center" else (Wt - lw if rtl else 0)
+        x = x0 + lw if rtl else x0
+        for w, m in ln:
+            hot = any(h and h in w for h in hl) or (highlight == "digits" and any(ch.isdigit() for ch in w))
+            lay = Image.new("RGBA", m.size, (hl_color if hot else tuple(color)) + (0,))
+            lay.putalpha(m)
+            im.alpha_composite(lay, (int(x - m.width if rtl else x), int(y)))
+            x = x - m.width - sp if rtl else x + m.width + sp
+        y += lh
+    return im
+
+
+def prompt_fn(ctx, text, cx, cy, t0, cps=14.0, width=None):
+    """Chat input bar that slides in and types `text` letter by letter with a blinking caret and a send button.
+    Returns (element, sfx list, time the typing ends)."""
+    U = ctx.U
+    w, h = int(width or ctx.W * 0.82), int(96 * U)
+    rtl = is_rtl(text)
+    base = Image.new("RGBA", (w, h))
+    d = ImageDraw.Draw(base)
+    d.rounded_rectangle((0, 0, w - 1, h - 1), h // 2, fill=(250, 250, 252, 255))
+    r = int(h * 0.33)
+    bcx = h * 0.52 if rtl else w - h * 0.52
+    d.ellipse((bcx - r, h / 2 - r, bcx + r, h / 2 + r), fill=ctx.c["primary"] + (255,))
+    s_, dr = r * 0.5, (-1 if rtl else 1)
+    d.polygon([(bcx + dr * s_, h / 2), (bcx - dr * s_ * 0.7, h / 2 - s_ * 0.85), (bcx - dr * s_ * 0.7, h / 2 + s_ * 0.85)],
+              fill=ink_for(ctx.c["primary"]) + (255,))
+    pad = int(26 * U)
+    base = np.asarray(finish(base, base.getchannel("A"), 0.55, U=U))
+    f = ctx.font("heavy", 44)
+    tstart = t0 + 0.3
+    cache = {}
+    t_end = tstart + len(text) / cps
+
+    def draw(out, t, bgf):
+        if t < t0:
+            return
+        p = e_cubic(clamp((t - t0) / 0.3))
+        y = cy - base.shape[0] / 2 + (1 - p) * 60 * U
+        over(out, base, cx - base.shape[1] / 2, y, p)
+        n = int(clamp((t - tstart) * cps, 0, len(text)))
+        sub = text[:n]
+        if sub not in cache:
+            cache[sub] = line_mask(sub, f) if sub.strip() else None
+        m = cache[sub]
+        right = cx + w / 2 - 44 * U
+        left = cx - w / 2 + 44 * U
+        tw = m.width if m is not None else 0
+        tx = right - tw if rtl else left
+        if m is not None:
+            lay = Image.new("RGBA", m.size, (28, 26, 40, 0))
+            lay.putalpha(m)
+            over(out, np.asarray(lay), tx, y + pad + h / 2 - m.height / 2, p)
+        if (t < t_end + 0.2) or int(t * 2.2) % 2 == 0:
+            cxr = tx - 6 * U if rtl else tx + tw + 4 * U
+            car = np.zeros((int(h * 0.5), max(2, int(4 * U)), 4), np.uint8)
+            car[..., :3] = ctx.c["primary"]
+            car[..., 3] = 255
+            over(out, car, cxr, y + pad + h * 0.25, p)
+    sfx = [(tstart + k / cps, "type", 0.35) for k in range(0, len(text), 2) if text[k].strip()]
+    return Fn(draw), sfx, t_end
+
+
+def b_contrast(sc, ctx):
+    """What you don't need (✕) and the one thing you do (✓): neon tags appear one by one; optional chat bar that types
+    a prompt and captions that change when the ✓ lands."""
+    U, W = ctx.U, ctx.W
+    bg = clip_bg(sc, {"dim": 0.5, "blur": 12}, 0.04) if sc.get("clip") else {"kind": "panel"}
+    items = [({"text": it} if isinstance(it, str) else it) for it in sc.get("items", [])]
+    per, st = float(sc.get("per", 0.55)), float(sc.get("start", 0.15))
+    imgs = []
+    for it in items:
+        good = it.get("mark", "x") == "check"
+        imgs.append(neon_pill(ctx, it["text"], it.get("mark", "x"), ctx.c["primary"] if good else ctx.c["primary2"],
+                              it.get("size", 90 if good else 76)))
+    band = ctx.bot - ctx.top
+    has_prompt = bool(sc.get("prompt"))
+    tags_cy = ctx.top + band * (0.27 if has_prompt else 0.42)
+    lay = stack(imgs, tags_cy, band * 0.48, [int(6 * U)] * max(0, len(imgs) - 1))
+    els, sfx = [], []
+    t_check = None
+    for i, ((im, cy), it) in enumerate(zip(lay, items)):
+        ti = st + per * i
+        good = it.get("mark", "x") == "check"
+        els.append(Sprite(im, W / 2 + (0 if good else (-1) ** i * 10 * U), cy, ti, "slam" if good else "pop", 0.32 if good else 0.3))
+        sfx.append((ti + 0.02, "thump" if good else "pop", 0.6 if good else 0.45))
+        if good and t_check is None:
+            t_check = ti
+    if has_prompt:
+        el, psfx, _ = prompt_fn(ctx, sc["prompt"], W / 2, ctx.top + band * 0.66, float(sc.get("prompt_at", st + 0.2)),
+                                float(sc.get("cps", 14)))
+        els.append(el)
+        sfx += psfx
+    caps = [c for c in (sc.get("caption"), sc.get("caption2")) if c]
+    only2 = bool(sc.get("caption2")) and not sc.get("caption")
+    if only2:
+        caps = ["", sc["caption2"]]
+    if caps:
+        hl = sc.get("highlight", ())
+        c1 = rich_text(ctx, caps[1] if only2 else caps[0], sc.get("caption_size", 46), "heavy",
+                       ctx.on_panel() if bg["kind"] == "panel" else (255, 255, 255), highlight=hl, max_w=W * 0.86)
+        c1 = finish(c1, c1.getchannel("A"), 0.6, U=U)
+        ccy = ctx.bot - c1.height / 2 - 10 * U
+        t_sw = (t_check if t_check is not None else st + per * len(items)) if len(caps) > 1 else 1e9
+        c2 = None
+        if len(caps) > 1:
+            c2 = rich_text(ctx, caps[1], sc.get("caption_size", 46), "heavy", ctx.on_panel() if bg["kind"] == "panel" else (255, 255, 255),
+                           highlight=hl, max_w=W * 0.86)
+            c2 = np.asarray(finish(c2, c2.getchannel("A"), 0.6, U=U))
+        a1 = np.asarray(c1)
+
+        def cap(out, t, bgf):
+            if t < 0.2 or (only2 and t < t_sw):
+                return
+            if only2:
+                q = clamp((t - t_sw) / 0.25)
+                over(out, c2, W / 2 - c2.shape[1] / 2, ccy - c2.shape[0] / 2 + (1 - e_cubic(q)) * 20 * U, q)
+                return
+            if t < t_sw:
+                over(out, a1, W / 2 - a1.shape[1] / 2, ccy - a1.shape[0] / 2, clamp((t - 0.2) / 0.3))
+            else:
+                q = clamp((t - t_sw) / 0.25)
+                if q < 1:
+                    over(out, a1, W / 2 - a1.shape[1] / 2, ccy - a1.shape[0] / 2, 1 - q)
+                over(out, c2, W / 2 - c2.shape[1] / 2, ccy - c2.shape[0] / 2 + (1 - e_cubic(q)) * 20 * U, q)
+        els.append(Fn(cap))
+    return bg, els, sfx
+
+
+def b_gallery(sc, ctx):
+    """Fast portfolio reel inside a 3D phone (or laptop): each item's screenshot or video for `per` seconds, with an
+    01/20 counter, a top label (what was asked for) and a bottom tag (what it is). Tall screenshots scroll."""
+    U, W, H = ctx.U, ctx.W, ctx.H
+    bg = clip_bg(sc, {"dim": 0.5, "blur": 12}, 0.04) if sc.get("clip") else {"kind": "panel"}
+    items = [({"src": it} if isinstance(it, str) else dict(it)) for it in sc.get("items", [])]
+    n = max(1, len(items))
+    per, t_in = float(sc.get("per", 0.7)), 0.45
+    kind = sc.get("device", "phone")
+    dw = W * (0.46 if kind == "phone" else 0.86) * float(sc.get("device_scale", 1.0)) * (0.62 if ctx.land else 1)
+    if kind == "phone":
+        sw, sh = int(dw * 0.93), int(dw * 2.05 - dw * 0.07)
+    else:
+        sw, sh = int(dw * 0.84), int(dw * 0.84 * 0.625)
+    total = sc.get("_dur", t_in + per * n + 0.6)
+    readers, last = {}, {}
+
+    def idx(t):
+        return 0 if t < t_in + per else min(n - 1, int((t - t_in) / per))
+
+    def start_of(i):
+        return 0.0 if i == 0 else t_in + i * per
+
+    def frame_of(i, t):
+        if i not in readers:
+            spec = norm_clip(items[i]["src"])
+            spec.setdefault("fit", "cover")
+            if is_photo(spec["src"]) and "move" not in spec:
+                iw, ih = Image.open(spec["src"]).size
+                if ih / iw > (sh / sw) * 1.15:
+                    spec["move"], spec["pan_speed"] = "pan_down", spec.get("pan_speed", 0.55)
+                else:
+                    spec["move"], spec["amount"] = "push", spec.get("amount", 0.06)
+            dur_i = (total - start_of(i)) if i == n - 1 else (start_of(i + 1) - start_of(i))
+            readers[i] = Reader(spec, sw, sh, ctx.fps, int(dur_i * ctx.fps) + 4, t0=max(0.0, t - start_of(i)),
+                                look={}, zoom=0.0, seed=i)
+        fr = readers[i].next()
+        last[i] = fr
+        return fr
+    muted = ctx.c.get("muted", (170, 170, 190))
+    head_cache = {}
+
+    def heads(i):
+        if i not in head_cache:
+            it = items[i]
+            num = ctx.T(f"{i + 1:02d}", "display", 104, grad=True, shadow=0.4)
+            tot = ctx.T(f"/{n:02d}", "heavy", 42, color=muted, shadow=0.3)
+            cnt = Image.new("RGBA", (num.width + tot.width - int(30 * U), max(num.height, tot.height)))
+            cnt.alpha_composite(num, (0, 0))
+            cnt.alpha_composite(tot, (num.width - int(30 * U), num.height - tot.height - int(6 * U)))
+            if not it.get("label"):
+                lab = None
+            elif headline:
+                lab = rich_text(ctx, it["label"], sc.get("label_size", 72), "display", ctx.c["text"],
+                                highlight=it.get("highlight", ()), max_w=W * 0.86)
+                lab = finish(lab, lab.getchannel("A"), 0.6, U=U)
+            else:
+                lab = pill(ctx, it["label"], None, 38, bg=ctx.c["primary"] + (255,), fg=ink_for(ctx.c["primary"]))
+            tag = pill(ctx, it["tag"], it.get("icon", "web"), 34, bg=(18, 14, 32, 238), fg=(255, 255, 255)) if it.get("tag") else None
+            head_cache[i] = (np.asarray(cnt), np.asarray(lab) if lab else None, np.asarray(tag) if tag else None)
+        return head_cache[i]
+    kick = ctx.T(sc["kicker"], "mono", 30, color=muted, shadow=0.3) if sc.get("kicker") else None
+    kick = np.asarray(kick) if kick is not None else None
+    d0 = device_img(ctx, kind, Image.new("RGBA", (sw, sh), (20, 20, 28, 255)), dw)
+    headline = sc.get("label_style", "pill" if (kind == "phone" or ctx.land) else "headline") == "headline"
+    dev_cy = ctx.top + (ctx.bot - ctx.top) * (0.58 if kind == "phone" else (0.43 if headline else 0.55))
+    head_y = ctx.top + 40 * U
+    gl = glow_blob(ctx, d0.width * 1.5, d0.height * 0.9, ctx.c["primary2"], 0.45)
+    swing = float(sc.get("swing", 9))
+
+    def draw(out, t, bgf):
+        i = idx(t)
+        u = t - start_of(i)
+        fr = frame_of(i, t)
+        if i > 0 and u < 0.14 and (i - 1) in last:
+            k = int(e_cubic(u / 0.14) * sh)
+            if 0 < k < sh:
+                fr = np.concatenate([last[i - 1][k:], fr[:k]], 0)
+        p = clamp(t / 0.55)
+        e = e_cubic(p)
+        a = clamp(p * 2.5)
+        over(out, gl, W / 2 - gl.shape[1] / 2, dev_cy - gl.shape[0] / 2, a * 0.9)
+        dev = device_img(ctx, kind, Image.fromarray(fr).convert("RGBA"), dw)
+        tgt = swing * (1 if i % 2 else -1)
+        prv = swing * (1 if (i - 1) % 2 else -1) if i else -swing * 2.4
+        ry = prv + (tgt - prv) * e_cubic(clamp(u / 0.3)) + 1.2 * math.sin(t * 1.3)
+        rx = 4 + (1 - e) * 16 + 1.5 * math.sin(t * 0.9)
+        im = tilt(dev, ry, rx)
+        dy = (1 - e) * H * 0.3 + math.sin(t * 1.6) * 6 * U
+        over(out, np.asarray(im), W / 2 - im.width / 2, dev_cy - im.height / 2 + dy, a)
+        cnt, lab, tag = heads(i)
+        bump = 1.0 if u > 0.18 else 0.85 + 0.15 * e_back(u / 0.18)
+        ha = clamp((t - 0.15) / 0.3)
+        if kick is not None:
+            over(out, kick, W * 0.06, head_y - kick.shape[0] * 0.7, ha)
+        over(out, cnt, W * 0.06, head_y + (kick.shape[0] * 0.25 if kick is not None else 0), ha)
+        dev_bot = dev_cy + d0.height * 0.5 + dy
+        if headline and lab is not None:
+            ly = dev_bot + (tag.shape[0] * 0.5 if tag is not None else 0) + 34 * U + lab.shape[0] / 2
+            q = e_cubic(clamp(u / 0.22)) if i > 0 else 1.0
+            over(out, lab, W / 2 - lab.shape[1] / 2, ly + (1 - q) * 26 * U, ha * clamp(q * 1.6))
+            lab = None
+        for arr, x, y in ((lab, W * 0.94, head_y + cnt.shape[0] * 0.55), (tag, W / 2, dev_bot)):
+            if arr is None:
+                continue
+            if bump < 0.999:
+                img = Image.fromarray(arr).resize((max(1, int(arr.shape[1] * bump)), max(1, int(arr.shape[0] * bump))), Image.BILINEAR)
+                arr = np.asarray(img)
+            cx_ = x - arr.shape[1] / 2 if x > W * 0.6 else x
+            over(out, arr, cx_ - arr.shape[1] / 2, y - arr.shape[0] / 2, ha)
+    sfx = [(0.05, "whoosh", 0.45)] + [(start_of(i), "click", 0.35) for i in range(1, n)]
+    return bg, [Fn(draw)], sfx
+
+
+def b_wall(sc, ctx):
+    """Proof wall: screenshots tiled on a 3D-tilted wall the camera glides across, a title, and quote cards popping in
+    one at a time. Use real screenshots and real quotes only."""
+    from PIL import ImageOps
+    U, W, H = ctx.U, ctx.W, ctx.H
+    bg = {"kind": "panel"}
+    srcs = [norm_clip(x)["src"] for x in sc.get("images", [])]
+    cols, rows = int(sc.get("cols", 6)), int(sc.get("rows", 5))
+    tw = int(W * float(sc.get("tile_w", 0.27)))
+    th = int(tw * float(sc.get("tile_ratio", 1.9)))
+    gap = int(18 * U)
+    canvas = Image.new("RGBA", (cols * (tw + gap) + gap, rows * (th + gap) + gap))
+    rmask = rounded_mask(tw, th, int(18 * U))
+    tiles = {}
+    rng = np.random.default_rng(7)
+    order = []
+    while len(order) < cols * rows and srcs:
+        order += list(rng.permutation(len(srcs)))
+    dim = float(sc.get("wall_dim", 0.6))
+    for k in range(cols * rows if srcs else 0):
+        s_ = srcs[order[k]]
+        if s_ not in tiles:
+            im = ImageOps.fit(ImageOps.exif_transpose(Image.open(s_)).convert("RGB"), (tw, th), Image.LANCZOS, centering=(0.5, 0.0))
+            arr = (np.asarray(im).astype(np.float32) * dim).astype(np.uint8)
+            t_ = Image.fromarray(arr).convert("RGBA")
+            t_.putalpha(rmask)
+            tiles[s_] = t_
+        r_, c_ = divmod(k, cols)
+        canvas.alpha_composite(tiles[s_], (gap + c_ * (tw + gap), gap + r_ * (th + gap)))
+    warped = tilt(canvas, float(sc.get("wall_ry", -14)), float(sc.get("wall_rx", 32)), dist=1.8)
+    sc_ = max(W * 1.45 / max(1, warped.width), H * 1.4 / max(1, warped.height))
+    warped = warped.resize((max(1, int(warped.width * sc_)), max(1, int(warped.height * sc_))), Image.LANCZOS)
+    wall = np.asarray(warped)
+    dur = sc.get("_dur", 6.0)
+    els = []
+
+    def wall_fn(out, t, bgf):
+        q = t / max(0.1, dur)
+        x = W / 2 - wall.shape[1] / 2 + (q - 0.5) * W * 0.12
+        y = H * 0.56 - wall.shape[0] / 2 + (0.5 - q) * H * 0.22
+        over(out, wall, x, y, clamp(t / 0.5))
+    els.append(Fn(wall_fn))
+    els.append(scrim_el(ctx, "top", 0.75, 0.42))
+    head = []
+    if sc.get("title"):
+        ti = rich_text(ctx, sc["title"], sc.get("title_size", 96), "display", ctx.c["text"],
+                       highlight=sc.get("title_highlight", "digits"), max_w=W * 0.88)
+        head.append(finish(ti, ti.getchannel("A"), 0.6, U=U))
+    if sc.get("sub"):
+        head.append(ctx.T(sc["sub"], "heavy", 44, color=ctx.c.get("muted", (200, 200, 210)), shadow=0.6))
+    y = ctx.top + 10 * U
+    for j, im in enumerate(head):
+        els.append(reveal_line(im, W / 2, y + im.height / 2, 0.1 + 0.15 * j))
+        y += im.height - 26 * U
+    quotes = [({"text": q} if isinstance(q, str) else q) for q in sc.get("quotes", [])]
+    t_q0, per_q = float(sc.get("quotes_at", 0.9)), float(sc.get("per_quote", 1.9))
+    cw = W * 0.86
+    pad = int(34 * U)
+    cards = []
+    for q in quotes:
+        body = rich_text(ctx, q["text"], q.get("size", 50), "heavy", (255, 255, 255), highlight=q.get("highlight", ()),
+                         max_w=cw - 2 * pad, align="start")
+        hdr = None
+        lab = q.get("label", sc.get("quote_label"))
+        if lab:
+            hdr = rich_text(ctx, lab, 30, "heavy", ctx.c["primary"], max_w=cw - 2 * pad, align="start")
+        who = ctx.T("— " + q["who"], "body", 32, color=ctx.c.get("muted", (200, 200, 210)), shadow=0) if q.get("who") else None
+        hh = (hdr.height + int(10 * U)) if hdr else 0
+        wh = (who.height - int(30 * U)) if who else 0
+        ch = int(hh + body.height + wh + 2 * pad)
+        card = Image.new("RGBA", (int(cw), ch))
+        dd = ImageDraw.Draw(card)
+        dd.rounded_rectangle((0, 0, card.width - 1, ch - 1), int(28 * U), fill=(24, 18, 46, 240),
+                             outline=ctx.c["primary2"] + (140,), width=max(2, int(2.5 * U)))
+        rtl = is_rtl(q["text"])
+        yy = pad
+        if hdr:
+            card.alpha_composite(hdr, (int(card.width - pad - hdr.width) if rtl else pad, yy))
+            yy += hdr.height + int(10 * U)
+        card.alpha_composite(body, (int(card.width - pad - body.width) if rtl else pad, yy))
+        yy += body.height
+        if who:
+            card.alpha_composite(who, (int(card.width - pad - who.width + 26 * U) if rtl else pad - int(26 * U), yy - int(26 * U)))
+        cards.append(np.asarray(finish(card, card.getchannel("A"), 0.6, U=U)))
+    qcy = ctx.cy + (ctx.bot - ctx.cy) * 0.2
+
+    def quotes_fn(out, t, bgf):
+        if not cards:
+            return
+        k = int((t - t_q0) // per_q)
+        if t < t_q0:
+            return
+        k = min(k, len(cards) - 1)
+        u = t - t_q0 - k * per_q
+        arr = cards[k]
+        p = clamp(u / 0.3)
+        s_ = 0.9 + 0.1 * e_back(p)
+        a = clamp(p * 2)
+        if k < len(cards) - 1 and u > per_q - 0.15:
+            a *= clamp((per_q - u) / 0.15)
+        if s_ < 0.999:
+            arr = np.asarray(Image.fromarray(arr).resize((max(1, int(arr.shape[1] * s_)), max(1, int(arr.shape[0] * s_))), Image.BILINEAR))
+        over(out, arr, W / 2 - arr.shape[1] / 2, qcy - arr.shape[0] / 2, a)
+    els.append(Fn(quotes_fn))
+    sfx = [(0.05, "whoosh", 0.4)] + [(t_q0 + k * per_q + 0.02, "pop", 0.5) for k in range(len(cards))]
+    return bg, els, sfx
+
+
+def bundle_card(ctx, it, w):
+    """Light product card: thumbnail, title, line and tag pills (offers, packages, products)."""
+    from PIL import ImageOps
+    U = ctx.U
+    pad = int(36 * U)
+    rtl = is_rtl(it.get("title", "") + it.get("text", ""))
+    thumb = None
+    if it.get("image") and os.path.exists(it["image"]):
+        tsz = int(w * 0.3)
+        ti = ImageOps.fit(ImageOps.exif_transpose(Image.open(it["image"])).convert("RGBA"), (tsz, int(tsz * 0.78)), Image.LANCZOS)
+        ti.putalpha(Image.fromarray(np.minimum(np.asarray(ti.getchannel("A")), np.asarray(rounded_mask(ti.width, ti.height, int(20 * U))))))
+        thumb = finish(ti, ti.getchannel("A"), 0.5, U=U).rotate(-6 if rtl else 6, Image.BICUBIC, expand=True)
+    tw_ = w - 2 * pad - (thumb.width - int(40 * U) if thumb else 0)
+    title = rich_text(ctx, it.get("title", ""), it.get("size", 66), "display", (26, 20, 44), max_w=tw_, align="start")
+    text = rich_text(ctx, it["text"], 36, "body", (78, 70, 98), max_w=tw_, align="start") if it.get("text") else None
+    tags = [pill(ctx, (tg if isinstance(tg, str) else tg.get("text", "")), (None if isinstance(tg, str) else tg.get("icon")),
+                 30, bg=(26, 20, 44, 255), fg=(255, 255, 255)) for tg in it.get("tags", [])]
+    tag_h = max((t_.height for t_ in tags), default=0)
+    th_ = title.height + (text.height + int(8 * U) if text else 0) + (tag_h - int(30 * U) if tags else 0)
+    h = int(max(th_, thumb.height - int(40 * U) if thumb else 0) + 2 * pad)
+    card = Image.new("RGBA", (int(w), h))
+    ImageDraw.Draw(card).rounded_rectangle((0, 0, card.width - 1, h - 1), int(34 * U), fill=(251, 246, 236, 255),
+                                           outline=(255, 255, 255, 255), width=max(1, int(2 * U)))
+    xr = card.width - pad
+    y = pad
+    for im in (title, text):
+        if im is None:
+            continue
+        card.alpha_composite(im, (int(xr - im.width) if rtl else pad, y))
+        y += im.height + int(8 * U)
+    x = xr
+    for tg in tags:
+        px = int(x - tg.width + 26 * U) if rtl else int(pad + (xr - x) - 26 * U)
+        card.alpha_composite(tg, (max(0, min(card.width - tg.width, px)), int(y - 26 * U)))
+        x -= tg.width - int(40 * U)
+    if thumb:
+        card.alpha_composite(thumb, (int(pad - 20 * U) if rtl else int(card.width - thumb.width - pad + 20 * U),
+                                     max(0, (h - thumb.height) // 2)))
+    return finish(card, card.getchannel("A"), 0.6, U=U)
+
+
+def b_bundle(sc, ctx):
+    """Product / package cards that land one after another, joined by a "+" (what the customer gets)."""
+    U, W = ctx.U, ctx.W
+    bg = clip_bg(sc, {"dim": 0.5, "blur": 12}, 0.04) if sc.get("clip") else {"kind": "panel"}
+    items = [it for it in sc.get("items", []) if isinstance(it, dict)][:3]
+    cards = [bundle_card(ctx, it, W * 0.86) for it in items]
+    plus = None
+    if len(cards) > 1:
+        r = int(34 * U)
+        pl = Image.new("RGBA", (2 * r, 2 * r))
+        dd = ImageDraw.Draw(pl)
+        dd.ellipse((0, 0, 2 * r - 1, 2 * r - 1), fill=ctx.c["primary"] + (255,))
+        lw = max(3, int(7 * U))
+        dd.line([(r, r * 0.5), (r, r * 1.5)], fill=ink_for(ctx.c["primary"]) + (255,), width=lw)
+        dd.line([(r * 0.5, r), (r * 1.5, r)], fill=ink_for(ctx.c["primary"]) + (255,), width=lw)
+        plus = finish(pl, pl.getchannel("A"), 0.5, glow=ctx.c["primary"], U=U)
+    seq = []
+    for i, c in enumerate(cards):
+        if i and plus is not None:
+            seq.append(plus)
+        seq.append(c)
+    title = ctx.T(sc["title"], "display", sc.get("title_size", 90), grad=True, wrap=True) if sc.get("title") else None
+    items_all = ([title] if title else []) + seq
+    lay = stack(items_all, ctx.cy, ctx.bot - ctx.top, [int(-30 * U)] * max(0, len(items_all) - 1))
+    els, sfx, t0 = [], [], 0.15
+    for im, cy in lay:
+        is_plus = plus is not None and im is plus
+        els.append(Sprite(im, W / 2, cy, t0, "pop" if is_plus else "up", 0.3 if is_plus else 0.45))
+        sfx.append((t0 + 0.02, "pop" if is_plus else "whoosh", 0.5 if is_plus else 0.35))
+        t0 += 0.25 if is_plus else 0.45
+    return bg, els, sfx
+
+
 BUILDERS = {"hook": b_hook, "stamp": b_stamp, "logo": b_logo, "title": b_title, "collage": b_collage,
             "showcase": b_showcase, "features": b_features, "location": b_location,
             "kinetic": b_kinetic, "cards": b_cards, "steps": b_steps, "device": b_device,
+            "contrast": b_contrast, "gallery": b_gallery, "wall": b_wall, "bundle": b_bundle,
             "counter": b_counter, "checklist": b_checklist, "testimonial": b_testimonial,
             "before_after": b_before_after, "offer": b_offer, "text": b_text, "cta": b_cta}
 DEFAULT_DUR = {"kinetic": 2.2, "device": 3.0, "showcase": 2.0, "location": 2.6, "hook": 2.2, "stamp": 1.9, "logo": 2.5, "title": 1.3, "collage": 2.4, "counter": 2.0,
                "testimonial": 4.2, "before_after": 3.6, "offer": 2.8, "text": 2.0, "cta": 5.0}
 DEFAULT_TRANS = {"kinetic": "blur", "cards": "zoom", "steps": "slide_up", "device": "zoom",
+                 "contrast": "blur", "gallery": "zoom", "wall": "blur", "bundle": "slide_up",
                  "showcase": "slide", "features": "zoom", "location": "zoom", "hook": "cut", "stamp": "glitch", "logo": "zoom", "title": "whip", "collage": "zoom",
                  "counter": "slide_up", "checklist": "zoom", "testimonial": "fade", "before_after": "whip",
                  "offer": "flash", "text": "punch", "cta": "zoom"}
@@ -2687,6 +3233,17 @@ def make_plan(brief, ctx, workdir):
             durs[i] = 0.8 + 0.12 * len(sc.get("items", [])) + 1.8
         if sc["type"] == "steps" and "dur" not in sc:
             durs[i] = 0.6 + float(sc.get("per", 0.55)) * len(sc.get("items", [])) + 1.4
+        if sc["type"] == "gallery" and "dur" not in sc:
+            durs[i] = 0.45 + float(sc.get("per", 0.7)) * len(sc.get("items", [])) + 0.6
+        if sc["type"] == "contrast" and "dur" not in sc:
+            d_ = float(sc.get("start", 0.15)) + float(sc.get("per", 0.55)) * len(sc.get("items", [])) + 1.4
+            if sc.get("prompt"):
+                d_ = max(d_, float(sc.get("prompt_at", 0.35)) + 0.3 + len(sc["prompt"]) / float(sc.get("cps", 14)) + 1.2)
+            durs[i] = d_
+        if sc["type"] == "wall" and "dur" not in sc:
+            durs[i] = max(3.0, float(sc.get("quotes_at", 0.9)) + float(sc.get("per_quote", 1.9)) * len(sc.get("quotes", [])) + 0.6)
+        if sc["type"] == "bundle" and "dur" not in sc:
+            durs[i] = 0.2 + 0.55 * len(sc.get("items", [])) + 2.2
     mus = brief.get("music") or {}
     beats = np.array([])
     if mus.get("file") and mus.get("beat_sync", True) and os.path.exists(mus["file"]):
@@ -2712,7 +3269,7 @@ def make_plan(brief, ctx, workdir):
     cache = json.load(open(cache_p)) if os.path.exists(cache_p) else {}
     used = {}
     bounds = np.round(np.cumsum([0] + durs) * ctx.fps).astype(int)
-    prev_key = ""
+    prev_key = prev_seed = ""
     for i, sc in enumerate(scenes):
         sc["_n"] = int(bounds[i + 1] - bounds[i])
         sc["_dur"] = sc["_n"] / ctx.fps
@@ -2728,15 +3285,25 @@ def make_plan(brief, ctx, workdir):
             sc["clips"] = [norm_clip(c) for c in sc["clips"]]
         srcs = [norm_clip(sc[k])["src"] for k in ("clip", "before", "after") if sc.get(k)] + \
                [c["src"] for c in sc.get("clips", [])] + [ctx.brand.get("logo") or ""]
+        media = [sc.get("image")] + list(sc.get("images") or []) + \
+                [(it.get("src") or it.get("image")) for it in (sc.get("items") or []) if isinstance(it, dict)]
+        srcs += [norm_clip(x)["src"] if isinstance(x, dict) else x for x in media if isinstance(x, (str, dict)) and x]
         stamp = [(f, os.path.getmtime(f), os.path.getsize(f)) for f in srcs if f and os.path.exists(f)]
         caps = [c for c in ctx.captions if c["s"] < sc["_t0"] + sc["_dur"] and c["e"] > sc["_t0"]]
-        h = hashlib.md5(json.dumps([VERSION, stamp, ctx.W, ctx.H, ctx.fps, ctx.c, ctx.ts, brief.get("brand", {}),
-                                    {k: v for k, v in sc.items() if k != "_t0"}, caps, ctx.bg_style, ctx.drift, ctx.top, ctx.bot,
-                                    round(sc["_t0"], 3) if (ctx.bg_style != "grid" or caps) else 0,
-                                    prev_key if sc["transition"] not in ("cut", "flash", "punch") else ""],
-                                   sort_keys=True, default=str).encode()).hexdigest()[:12]
+        def key_for(ver, prev):
+            return hashlib.md5(json.dumps([ver, stamp, ctx.W, ctx.H, ctx.fps, ctx.c, ctx.ts, brief.get("brand", {}),
+                                           {k: v for k, v in sc.items() if k not in ("_t0", "_seed")}, caps, ctx.bg_style,
+                                           ctx.drift, ctx.top, ctx.bot,
+                                           round(sc["_t0"], 3) if (ctx.bg_style != "grid" or caps) else 0,
+                                           prev if sc["transition"] not in ("cut", "flash", "punch") else ""],
+                                          sort_keys=True, default=str).encode()).hexdigest()[:12]
+        h = key_for(VERSION, prev_key)
+        # random choices (drift, sparkles) are seeded independently of the engine version, so the same brief
+        # looks the same after an engine upgrade; only the cache key changes
+        seed_h = key_for(SEED_SALT, prev_seed)
+        sc["_seed"] = int(seed_h, 16)
         sc["_key"] = h
-        prev_key = h
+        prev_key, prev_seed = h, seed_h
     json.dump(cache, open(cache_p, "w"))
     return scenes
 
@@ -2766,10 +3333,10 @@ def frames(sc, ctx, k0=0, count=None, prev=None):
         lk = dict(ctx.grade)
         lk.update(bg.get("look") or {})
         reader = Reader(norm_clip(bg["clip"]), W, H, ctx.fps, n, t0=k0 / ctx.fps, look=lk,
-                        zoom=bg.get("zoom", 0.05), seed=int(sc["_key"], 16) % 1000)
+                        zoom=bg.get("zoom", 0.05), seed=sc["_seed"] % 1000)
     animated = bg["kind"] == "panel" and ctx.bg_style != "grid"
     base = ctx.panel() if (bg["kind"] == "panel" and not animated) else np.zeros((H, W, 3), np.uint8)
-    rng = np.random.default_rng(int(sc["_key"], 16) % 2 ** 32)
+    rng = np.random.default_rng(sc["_seed"] % 2 ** 32)
     shake = extra.get("shake")
     drift = float(sc.get("drift", ctx.drift if sc["type"] not in ("collage", "device") else 0))
     try:
@@ -2868,6 +3435,10 @@ def synth(name):
         f = 500 + 900 * (1 - np.exp(-t * 60))
         y = np.sin(2 * np.pi * np.cumsum(f) / SR) * np.exp(-t * 45)
         return np.stack([y, y], 1) * 0.6, 0.0
+    if name == "type":
+        t = t_(0.05)
+        y = rng.standard_normal(len(t)) * np.exp(-t * 260) * 0.5 + np.sin(2 * np.pi * 3800 * t) * np.exp(-t * 180) * 0.25
+        return np.stack([y, y], 1) * 0.5, 0.0
     if name == "click":
         t = t_(0.08)
         y = rng.standard_normal(len(t)) * np.exp(-t * 400) * 0.6 + np.sin(2 * np.pi * 2600 * t) * np.exp(-t * 90) * 0.5
@@ -3125,7 +3696,8 @@ def draw_captions(out, T, ctx):
 KNOWN_TYPES = set(BUILDERS) | {"services", "stats"}
 REQUIRED = {"hook": ["big"], "stamp": ["stamp"], "kinetic": ["lines"], "cards": ["items"], "steps": ["items"],
             "features": ["items"], "checklist": ["items"], "services": ["items"], "stats": ["items"],
-            "before_after": ["before", "after"], "collage": [], "counter": ["value"]}
+            "before_after": ["before", "after"], "collage": [], "counter": ["value"],
+            "contrast": ["items"], "gallery": ["items"], "wall": ["images"], "bundle": ["items"]}
 
 
 def load_brief(path):
@@ -3180,6 +3752,25 @@ def validate(brief):
             if len(ok) < len(sc["clips"]):
                 warns.append(f"scene {i} ({t}): {len(sc['clips']) - len(ok)} collage clip(s) missing - skipped")
             sc["clips"] = ok
+        if t == "gallery" and isinstance(sc.get("items"), list):
+            keep = [it for it in sc["items"] if os.path.exists(norm_clip(it if isinstance(it, str) else it.get("src", ""))["src"])]
+            if len(keep) < len(sc["items"]):
+                warns.append(f"scene {i} (gallery): {len(sc['items']) - len(keep)} item(s) missing - skipped")
+            sc["items"] = keep
+            if not keep:
+                errs.append(f"scene {i} (gallery): no item files found")
+        if t == "wall" and isinstance(sc.get("images"), list):
+            keep = [x for x in sc["images"] if os.path.exists(norm_clip(x)["src"])]
+            if len(keep) < len(sc["images"]):
+                warns.append(f"scene {i} (wall): {len(sc['images']) - len(keep)} image(s) missing - skipped")
+            sc["images"] = keep
+            if not keep:
+                errs.append(f"scene {i} (wall): no image files found")
+        if t == "bundle":
+            for it in sc.get("items", []) if isinstance(sc.get("items"), list) else []:
+                if isinstance(it, dict) and it.get("image") and not os.path.exists(it["image"]):
+                    warns.append(f"scene {i} (bundle): image '{it['image']}' not found - card without picture")
+                    it.pop("image")
         if sc.get("image") and not os.path.exists(sc["image"]):
             warns.append(f"scene {i} ({t}): image '{sc['image']}' not found - showing the animated UI instead")
             sc.pop("image")
@@ -3452,11 +4043,12 @@ def qa(video, brief, scenes, ctx, creative=None, out_prefix=None):
     rep["warnings"] += lw
     chk("no text or graphics cut off at the frame edge", not le, len(le), 5)
     first = scenes[0] if scenes else {}
-    chk("hook: first scene is a hook-type scene and <= 3 s", first.get("type") in ("hook", "kinetic", "showcase", "location")
+    chk("hook: first scene is a hook-type scene and <= 3 s", first.get("type") in ("hook", "kinetic", "showcase", "location", "contrast", "counter")
         and first.get("_dur", 9) <= 3.0, f"{first.get('type')} {first.get('_dur', 0):.2f}s", 5)
     last = scenes[-1] if scenes else {}
     chk("ends on a CTA held >= 4 s", last.get("type") == "cta" and last.get("_dur", 0) >= 4.0, f"{last.get('type')} {last.get('_dur', 0):.2f}s", 5)
-    avg = planned / max(1, len(scenes))
+    shots = sum(max(1, len(sc.get("items", []))) if sc.get("type") == "gallery" else 1 for sc in scenes)
+    avg = planned / max(1, shots)
     chk("average shot 1.2-4.0 s", 1.2 <= avg <= 4.0, f"{avg:.2f}s", 5)
     plat = PLATFORMS.get(brief.get("platform", ""))
     if plat and not plat[2][0] <= dur <= plat[2][1]:
@@ -3559,6 +4151,14 @@ def selftest(workers=2):
                  {"type": "cards", "title": "כרטיסים", "items": [{"icon": "home", "title": "אתרים"}, {"icon": "people", "title": "CRM"}], "dur": 1.4},
                  {"type": "steps", "title": "תהליך", "items": [{"title": "שלב"}, {"title": "שלב"}], "dur": 1.4},
                  {"type": "device", "ui": "flow", "title": "מכשיר", "dur": 1.4},
+                 {"type": "contrast", "items": [{"text": "לא", "mark": "x"}, {"text": "כן", "mark": "check"}], "prompt": "בדיקת הקלדה",
+                  "caption2": "כיתוב אחרי הסימון", "dur": 1.6},
+                 {"type": "gallery", "items": [{"src": "p0.jpg", "label": "תווית", "tag": "תגית"}, {"src": "v.mp4", "label": "וידאו"}],
+                  "per": 0.5, "dur": 1.5},
+                 {"type": "gallery", "device": "laptop", "items": [{"src": "p1.jpg", "label": "כותרת", "tag": "תגית"}], "dur": 1.0},
+                 {"type": "wall", "title": "קיר 3 עבודות", "images": ["p0.jpg", "p1.jpg", "p2.jpg"],
+                  "quotes": [{"text": "ציטוט בדיקה", "who": "בדיקה"}], "quotes_at": 0.3, "dur": 1.4},
+                 {"type": "bundle", "items": [{"title": "אחד", "text": "שורה", "image": "p2.jpg", "tags": ["תג"]}, {"title": "שתיים"}], "dur": 1.4},
                  {"type": "logo", "dur": 1.0},
                  {"type": "cta", "headline": "צרו קשר", "dur": 1.6}]}
     bp = os.path.join(d, "brief.json")

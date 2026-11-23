@@ -1,6 +1,6 @@
 ---
 name: "promo-reel-maker"
-description: "Make branded, beat-synced promo videos (Reels/TikTok/Shorts/Status ads, YouTube promos) for a business from its clips, photos or website/brand repo: kinetic typography, motion graphics, device mockups, automatic QA report. Hebrew/RTL first; 9:16 plus 1:1, 4:5, 16:9, up to 4K. Use for סרטון פרסומי, רילס לעסק, סרטון מיתוג, or 'make a video like this'."
+description: "Make branded, beat-synced promo videos (Reels/TikTok/Shorts/Status ads, YouTube promos) for a business from its clips, photos or website/brand repo: kinetic typography, motion graphics, device mockups, portfolio galleries and proof walls, automatic QA report. Hebrew/RTL first; 9:16 plus 1:1, 4:5, 16:9, up to 4K. Use for סרטון פרסומי, רילס לעסק, סרטון מיתוג, or 'make a video like this'."
 ---
 
 # Promo Reel Maker
@@ -10,6 +10,8 @@ Turns a business's raw clips/photos plus a few facts into a polished 20-40 s ad:
 Version 2 adds what the strongest short-form ads do: photos get real camera moves (wide shots pan across instead of being cropped), footage stays bright with soft scrims and boxed caption-style text instead of a dimmed frame, a `showcase` scene for one-feature-per-shot tours, `features` (icon rows on glass), `location` (map-pin drop), a boxed hook, slide / light-leak / blur transitions, colour grades, Reels safe zones and scene lengths set in beats.
 
 Version 3 adds brand and tech motion graphics that need no footage (Formula C): an animated brand background (moving glows, particles, slow camera push), kinetic typography with mask reveals, glass service cards with a highlight pass, a process timeline, phone/laptop mockups with animated illustrative UI or a real screenshot, a logo burst. It also adds a creative-planning step with a storyboard (`--plan`), platform presets, brand kits extracted from a website or repo (`--brand-from`), captions for a recorded voiceover, brief validation with recovery, an automatic QA report with a 0-100 score (`--qa`), a production log (`--history`), starter templates (`--new`) and a self-test (`--selftest`). v1 and v2 briefs keep rendering with the same scenes and style (multi-line text is now balanced across lines).
+
+Version 3.1 adds the neon course/agency ad (Formula D): `contrast` (✕ what they use today, ✓ the answer, a chat bar that types a request, a caption that switches when the ✓ lands), `gallery` (a fast portfolio reel of real screenshots or clips inside a 3D phone or laptop, with a 01/07 counter and labels), `wall` (all the work on a tilted 3D wall, with quote cards for real testimonials), `bundle` (1-3 offer cards joined by "+"), a `neon` colour preset, a typing sound, and a solid pill CTA button (`button_style`, `button_icon`). v3.0 briefs render pixel-identical.
 
 ## 0. Setup (once per session)
 
@@ -42,7 +44,7 @@ Ask for missing required items in one short message; don't block on optional one
 
 Brand kit from official assets: when the brand has a website folder or repo (clone a public repo with `git clone --depth 1 <url>`), run `python3 $E --brand-from <dir> --kit brand_kit.json`. It reads CSS colour variables, font families, the web manifest (name, description), the largest logo/icon PNG (saved as brand_logo.png next to the kit), the most frequent phone number and the site URL (from SITE_URL/metadataBase, skipping tests and third-party domains). Check the printed kit against the source - never invent brand details or swap the logo - then point the brief at it with `"brand_kit": "brand_kit.json"`. Copy for the video should come from the site's own text (hero line, services, process, CTA); read it from the content files. Respect what the site says about itself (e.g. "prices quoted after discovery" means no prices in the video).
 
-If the user sends a reference video ("make one like this"): analyze it first - contact sheet (`ffmpeg -i ref.mp4 -vf "fps=1,scale=180:-1,tile=12x3" -frames:v 1 ref.jpg`), cut detection (`ffmpeg -i ref.mp4 -vf "select='gt(scene,0.12)',showinfo" -an -f null - 2>&1 | grep -o "pts_time:[0-9.]*"`), and a spectrogram (`showspectrumpic`) to see music vs voice and where SFX hit. Map its structure and pacing onto the scene types below. Imitate structure and pacing only - never reuse another business's brand, logo, footage or copy in the user's video.
+If the user sends a reference video ("make one like this"): analyze it first - contact sheet (`ffmpeg -i ref.mp4 -vf "fps=1,scale=180:-1,tile=12x3" -frames:v 1 ref.jpg`), cut detection (`ffmpeg -i ref.mp4 -vf "select='gt(scene,0.12)',showinfo" -an -f null - 2>&1 | grep -o "pts_time:[0-9.]*"`), and a spectrogram (`showspectrumpic`) to see music vs voice and where SFX hit. Map its structure and pacing onto the scene types below (neon motion-graphics ads with ✕/✓ tags, a portfolio counter or a wall of screenshots → Formula D). Imitate structure and pacing only - never reuse another business's brand, logo, footage, screenshots, testimonials or copy in the user's video.
 
 ## 1b. Creative plan (before writing the brief)
 
@@ -109,7 +111,24 @@ Theme: `{"preset": "tech", "type": "tech", "bg_style": "tech"}` or a brand kit. 
 
 Kinetic lines are design lines: each one stays on one line and shrinks to fit (set `"wrap": true` on a line to allow wrapping), so break the copy into lines yourself, 2-3 words each. Mono kickers are for Latin labels (WEB · CRM); Hebrew kickers automatically use the heavy font. The device scene's built-in UI (dashboard, crm, flow, shop) is abstract shapes in brand colours with no numbers: label it with `note` ("*המחשה") unless it shows a real screenshot (`image`), and never put invented data, client names or results in a screenshot.
 
-Copy rules: Hebrew unless asked otherwise; one idea per scene; big lines short (about 12 characters looks best - longer lines auto-shrink); small lines up to about 25 characters; digits for numbers; total 15-30 s for Formulas A and C, 25-40 s for Formula B; CTA at least 4 s. Multi-line text is balanced automatically (no single word left on the last line).
+### Formula D - neon course / agency ad: portfolio, proof and offer (courses, studios, freelancers, agencies)
+
+Built from the user's REAL work: screenshots of their own sites or apps, clips of their products, real messages from clients. Theme: the brand kit's colours, or `{"preset": "neon", "type": "tech", "bg_style": "tech"}` (dark violet with orange/purple neon) when the brand has none.
+
+| # | scene | purpose | example copy (Nisan Sinai Technologies) | length |
+|---|---|---|---|---|
+| 1 | kinetic (or counter with a REAL number) | hook: the pain as a question | העסק שלך / עדיין רץ על / accent אקסל? | 4 beats |
+| 2 | contrast | ✕ what they use today, ✓ the answer; the chat bar types the request; caption2 lands with the ✓ | ✕ אקסל, ✕ וואטסאפים, ✓ מערכת אחת; prompt "אני צריך אתר עם הזמנות אונליין"; caption2 "טכנולוגיה שמסדרת את העסק." | auto, about 3.5 s |
+| 3 | gallery | the portfolio at speed: one screenshot or clip per item with a counter, what was built (label) and which project (tag) | 7 items, per 0.85; laptop for desktop screenshots, phone for mobile ones | 0.45 + per × items + 0.6 |
+| 4 | wall | proof: every screenshot on a tilted wall plus a title; quote cards only from real messages | "מערכות שכבר עובדות בעולם האמיתי." | 3.5 s, + 1.9 s per quote |
+| 5 | bundle | what you sell: 1-3 offer/service cards joined by "+" | "אתרים וחנויות אונליין" + "מערכות CRM ו-ERP" | auto, about 3.5 s |
+| 6 | kinetic | the promise | אני בונה את / accent הטכנולוגיה / שהעסק שלך צריך. | 5 beats |
+| 7 | cta | logo, one action; `button_style: primary` + `button_icon: false` gives a solid pill like a course ad | "בואו נבנה משהו מעולה" | ≥ 4 s |
+
+Real assets only: gallery and wall items are the user's own work - label demo or concept projects as such in the tag (the demo used "Shel-Yah · פרויקט הדגמה", the site's own wording); a counter shows a real number; quote cards come only from messages the user sends (screenshots or exact text) and is allowed to publish - never invent or "illustrate" a testimonial. If there are no real quotes, the wall shows the work itself. Never copy the reference ad's brand, screenshots, testimonials or copy.
+Screenshots: when a browser is available, open the user's own sites, decline cookie banners (the privacy-preserving choice), scroll to the hero and to two or three key sections and take screenshots; close the tabs you opened. Remove the mouse cursor and browser-extension icons from each screenshot (`cv2.inpaint` on a small mask, or crop). Use desktop screenshots in the laptop (`device: laptop`; the label becomes a large headline under it) and tall mobile screenshots in the phone (they scroll automatically). `focus` [x, y] in an item's `src` aims the crop. On the wall set `tile_ratio` to the screenshots' height/width (0.45 for desktop screenshots, 1.9-2.2 for mobile) and `tile_w` 0.5 for wide tiles.
+
+Copy rules: Hebrew unless asked otherwise; one idea per scene; big lines short (about 12 characters looks best - longer lines auto-shrink); small lines up to about 25 characters; digits for numbers; total 15-30 s for Formulas A, C and D, 25-40 s for Formula B; CTA at least 4 s. Multi-line text is balanced automatically (no single word left on the last line).
 Honesty: never invent numbers, testimonials, client names, certifications or prices. If something is missing, drop that scene, or use an obviously marked placeholder and tell the user it must be replaced before publishing. The CTA button draws a generic chat icon (no third-party logos); naming WhatsApp in the button text is fine.
 Unless the user wants to approve copy first, go straight to the preview and show the script together with the preview sheet.
 
@@ -185,6 +204,9 @@ SFX: the engine fires these names automatically. Proven Soundza picks (download 
 | ding | counter lands | cmvcmbkdi4e6xbwonobll8ebf (Desk Bell Ding) | 0.315 | max 1.5, gain 0.7 |
 | reveal | logo | cmvcm7nb06a2l2llux8dxyn0n (Dramatic Impact Hit) | 0.325 | max 2.5 |
 | glitch | glitch transition | cmvcmf2aixr9r14u2pcug3b10 (TV Glitch) | 0 | max 0.35, gain 0.8 |
+| type | chat-bar typing (contrast `prompt`), every second character | synthesized by default (short tick); any short keyboard-click file works | 0 | gain 0.5 |
+
+Formula D scenes also fire: pop (✕ tags, quote cards), thump (the ✓ tag), click (each gallery item), whoosh (gallery and wall entrances).
 
 More options: Soundza pack `video-editing-sound-effects-whooshes-pops-clicks-glitches-and-camera-shutters`. Any SFX file that is missing falls back to a synthesized version, so a video never ships silent. When the video is published, suggest (optional) crediting soundza.com.
 
@@ -211,7 +233,7 @@ Automatic QA (written after every render unless `--no-qa` or `"qa": false`; run 
 | technical | loudness -16 to -12 LUFS; true peak ≤ -1 dBTP (ebur128) | 6 + 4 |
 | technical | no silent gap over 1 s (silencedetect) | 5 |
 | technical | no text/graphic cut off at the frame edge (element bounds); elements outside the safe band are listed as warnings | 5 |
-| structure | first scene is a hook type and ≤ 3 s; ends on a CTA held ≥ 4 s; average shot 1.2-4 s | 5 + 5 + 5 |
+| structure | first scene is a hook type (hook, kinetic, showcase, location, contrast, counter) and ≤ 3 s; ends on a CTA held ≥ 4 s; average shot 1.2-4 s (each gallery item counts as a shot) | 5 + 5 + 5 |
 | creative | hook strength, clarity/readability, pacing/rhythm, aesthetics/brand, message/CTA - 0-5 each | 25 |
 
 The first 75 points are measured. The creative 25 are a reviewer's judgement: watch the QA sheet and the key frames, score honestly, and record it with `python3 $E brief.json --qa out.mp4 --creative 4,5,4,4,5`. The report labels it as subjective; when reporting to the user, give the measured part and the judgement separately and never present the total as objective proof of quality. Target: measured 75/75 with no errors, total 90 or more. Below that: fix the cause in the brief (copy length, line breaks, scene length, music section, layout) and re-render - only changed scenes re-render. Also look at the frames around every cut (`ffmpeg -ss <cut±0.1> -i out.mp4 -frames:v 1`) - QA does not judge whether a transition looks good.
@@ -232,7 +254,7 @@ Send the MP4 and a preview image (8 key frames from the final file, or the cover
 ## 8. Maintenance and versioning
 
 - The engine prints its version (`--help` header; `VERSION` in the code) and every render appends one line to `~/.cache/promo-reel/runs.jsonl` (brief, output, scenes, duration, render time, QA score, errors, warnings). `python3 $E --history` shows the last renders - use it to spot recurring problems across jobs.
-- Lessons from a job go into that log or the conversation, not straight into this file. Change the skill only through a reviewed update: back up the current SKILL.md, change the engine and docs, run `--selftest` and a real render of an old brief (backward compatibility), then propose the update for the user to save. Never delete a working scene type, field or option; add new behaviour behind new fields or defaults that leave older briefs unchanged.
+- Lessons from a job go into that log or the conversation, not straight into this file. Change the skill only through a reviewed update: back up the current SKILL.md, change the engine and docs, run `--selftest` and a real render of an old brief (backward compatibility), then propose the update for the user to save. Never delete a working scene type, field or option; add new behaviour behind new fields or defaults that leave older briefs unchanged. Random choices (background drift, particles) are seeded from the scene content with a frozen salt (`SEED_SALT`), not from `VERSION`, so the same brief looks the same after an engine upgrade - check this by rendering `--frame` stills of an old brief with the previous and the new engine and comparing pixels (expect a difference of 0).
 
 ## Brief reference
 
@@ -302,10 +324,31 @@ Formula C example - the tested acceptance brief (Nisan Sinai Technologies, 29.8 
 }
 ```
 
+Formula D example - the tested acceptance brief (Nisan Sinai Technologies, real screenshots of his own sites, 27.3 s, QA 75/75; `sfx` as in the first example):
+```json
+{
+  "out": "nst_results.mp4",
+  "platform": "reels",
+  "brand_kit": "brand_kit.json",
+  "theme": {"preset": "tech", "type": "tech", "bg_style": "tech", "grade": "bright"},
+  "brand": {"website": "nisan-sinai-technologies.vercel.app", "corner_logo": true},
+  "music": {"file": "assets/sfx/music_edit.wav", "volume": 0.8},
+  "scenes": [
+    {"type": "kinetic", "lines": ["העסק שלך", "עדיין רץ על", {"text": "אקסל?", "style": "accent"}], "beats": 4},
+    {"type": "contrast", "transition": "zoom", "items": [{"text": "אקסל", "mark": "x"}, {"text": "וואטסאפים", "mark": "x"}, {"text": "מערכת אחת", "mark": "check"}], "prompt": "אני צריך אתר עם הזמנות אונליין", "prompt_at": 0.25, "cps": 16, "caption2": "טכנולוגיה שמסדרת את העסק.", "highlight": ["שמסדרת"], "caption_size": 62},
+    {"type": "gallery", "device": "laptop", "kicker": "פרויקטים נבחרים", "per": 0.85, "items": [{"src": {"src": "shots/ld_hero.jpg", "focus": [0.6, 0.5]}, "label": "אתר ומערכת הזמנות", "tag": "LD Event Design", "icon": "calendar"}, {"src": {"src": "shots/ld_form.jpg", "focus": [0.5, 0.5]}, "label": "איסוף פניות מהאתר", "tag": "LD Event Design", "icon": "people"}, {"src": {"src": "shots/ld_catalog.jpg", "focus": [0.55, 0.5]}, "label": "חבילות, פריטים וסל הזמנה", "tag": "LD Event Design", "icon": "cart"}, {"src": {"src": "shots/shelyah_hero.jpg", "focus": [0.6, 0.5]}, "label": "חנות אונליין", "tag": "Shel-Yah · פרויקט הדגמה", "icon": "cart"}, {"src": {"src": "shots/shelyah_products.jpg", "focus": [0.55, 0.5]}, "label": "קטלוג וסל קנייה", "tag": "Shel-Yah · פרויקט הדגמה", "icon": "cart"}, {"src": {"src": "shots/rsvp_hero.jpg", "focus": [0.6, 0.5]}, "label": "פלטפורמת אישורי הגעה", "tag": "מערכת אישורי הגעה", "icon": "calendar"}, {"src": {"src": "shots/rsvp_demo.jpg", "focus": [0.5, 0.5]}, "label": "דשבורד בזמן אמת", "tag": "מערכת אישורי הגעה", "icon": "chart"}]},
+    {"type": "wall", "title": "מערכות שכבר עובדות בעולם האמיתי.", "title_size": 84, "title_highlight": ["עובדות"], "images": ["shots/ld_hero.jpg", "shots/ld_form.jpg", "shots/ld_items.jpg", "shots/ld_catalog.jpg", "shots/shelyah_hero.jpg", "shots/shelyah_products.jpg", "shots/rsvp_hero.jpg", "shots/rsvp_demo.jpg", "shots/nst_hero.jpg", "shots/nst_services.jpg"], "tile_w": 0.5, "tile_ratio": 0.4525, "cols": 4, "rows": 9, "wall_dim": 0.7, "dur": 3.6},
+    {"type": "bundle", "title": "מה אני בונה", "items": [{"title": "אתרים וחנויות אונליין", "text": "אתרי תדמית, דפי נחיתה וחנויות מהירות", "image": "shots/shelyah_hero.jpg", "tags": ["UX/UI", "E-commerce", "SEO"]}, {"title": "מערכות CRM ו-ERP", "text": "לקוחות, לידים, הזמנות ותפעול במערכת אחת", "image": "shots/rsvp_demo.jpg", "tags": ["Leads", "Operations", "Reports"]}]},
+    {"type": "kinetic", "lines": ["אני בונה את", {"text": "הטכנולוגיה", "style": "accent"}, "שהעסק שלך צריך."], "beats": 5},
+    {"type": "cta", "logo": true, "eyebrow": "יש לך רעיון?", "eyebrow_size": 60, "headline": "בואו נבנה משהו מעולה", "headline_size": 100, "button": "שלחו הודעה בוואטסאפ", "beats": 11}
+  ]
+}
+```
+
 Top-level fields:
 - `out` (default promo.mp4); `format`: 9x16 | 1x1 | 4x5 | 16x9; `formats`: list - renders each (suffix _<fmt>); `fps` (30); `platform` (section 2, Platforms) sets the default format, safe band and length check; `scale` (1; 2 = 4K).
 - `safe`: reels (default; text between 13% and 76% of the height) | tiktok | ads (bottom 35% kept clear, for paid placements) | full.
-- `theme`: `grade` bright (default) | warm | cool | punchy | natural - colour grade for all footage; `preset` gold | fire | electric | fresh | royal | clean (light) | tech (dark, cyan/violet) | auto (colors from the logo); color overrides `primary, primary2, hi, accent, bg, text, muted, cta` (hex); `type` (typeset) bold | classic | condensed | elegant | playful | retro | tech (Noto Sans Hebrew + Geist Mono labels); `font_display/font_heavy/font_body/font_stamp/font_mono` = a .ttf path or a font key; `bg_style` grid (default, static branded grid) | tech (animated glows, drifting particles, grid fading at the edges); `drift` = slow camera push per scene (0.035 with bg_style tech, 0 with grid; a scene can set its own `drift`, 0 = off).
+- `theme`: `grade` bright (default) | warm | cool | punchy | natural - colour grade for all footage; `preset` gold | fire | electric | fresh | royal | clean (light) | tech (dark, cyan/violet) | neon (dark violet, orange/purple neon) | auto (colors from the logo); color overrides `primary, primary2, hi, accent, bg, text, muted, cta` (hex); `type` (typeset) bold | classic | condensed | elegant | playful | retro | tech (Noto Sans Hebrew + Geist Mono labels); `font_display/font_heavy/font_body/font_stamp/font_mono` = a .ttf path or a font key; `bg_style` grid (default, static branded grid) | tech (animated glows, drifting particles, grid fading at the edges); `drift` = slow camera push per scene (0.035 with bg_style tech, 0 with grid; a scene can set its own `drift`, 0 = off).
 - `brand`: `name, tagline, initials, logo, phone, website, corner_logo` (small logo top-left on footage scenes and on the animated background), `logo_bg` auto (default: removes the flat square background of an opaque logo) | keep.
 - `brand_kit`: path to a kit from `--brand-from`; its theme and brand fields are defaults the brief can override.
 - `clips`: pool of clips (paths or specs) and/or `clips_dir`: auto-assigned to scenes that have no `clip` key (set `"clip": null` to force the panel).
@@ -339,7 +382,11 @@ Every scene accepts: `dur` or `beats` (length in music beats; needs music), `tra
 | before_after | before, after, labels, wipe_at, caption | 3.6 | whip |
 | offer | badge, big, small, note, clip | 2.8 | flash |
 | text | lines [str or {text, style small\|body\|big\|accent, anim, size}], clip | 2.0 | punch |
-| cta | eyebrow, eyebrow_size (46), headline, headline_size (92), button (text or false), phone, website, qr (url), logo (true), tap_at, clip | 5.0 | zoom |
+| cta | eyebrow, eyebrow_size (46), headline, headline_size (92), button (text or false), button_style cta\|primary (cta = the theme's cta colour), button_icon (true = chat icon; false = centered text pill), phone, website, qr (url), logo (true), tap_at, clip | 5.0 | zoom |
+| contrast | items [{text, mark x\|check, size (76 ✕ / 90 ✓)}], per (0.55), start (0.15), prompt (chat bar that types it), prompt_at, cps (14 characters/s), caption (shown until the ✓), caption2 (from the ✓; alone it appears with the ✓), highlight (words), caption_size (46), clip | start + per × items + 1.4, longer with a prompt | blur |
+| gallery | items [{src (image or clip spec), label, tag, icon, highlight}], per (0.7), kicker, device phone\|laptop, device_scale (1), swing (9), label_style pill\|headline (headline: laptop in portrait), label_size (72), clip | 0.45 + per × items + 0.6 | zoom |
+| wall | images, cols (6), rows (5), tile_w (0.27 of width), tile_ratio (tile height/width, 1.9), wall_dim (0.6), wall_ry (-14), wall_rx (32), title, title_size (96), title_highlight (default: numbers), sub, quotes [{text, highlight, who, label, size}], quote_label, quotes_at (0.9), per_quote (1.9) | max(3, quotes_at + per_quote × quotes + 0.6) | blur |
+| bundle | items [{title, text, image, tags [text or {text, icon}], size (66)}] (up to 3), title, title_size (90), clip | 0.2 + 0.55 × items + 2.2 | slide_up |
 
 Transitions: cut, flash, punch, fade, zoom, whip, slide, slide_up, glitch, blur, leak (warm light leak). Text animations: up, down, fade, pop, zoom, slam, wipe, left, right, none.
 Icons (label, place, features, cards): pin, people, bed, view, waves, pool, star, sparkle, check, home, snow (air conditioning), wifi, parking, sun, heart, calendar, chat, phone, key, book, kitchen, coffee, clock, web, cart, layers, bolt, gear, code, chip, chart, rocket, search, lock. An unknown icon falls back to check (with a warning).
@@ -361,6 +408,9 @@ Command line: `python3 $E [brief.json] [--out FILE] [--format F] [--draft] [--pr
 - An empty moment right after a cut: set the next kinetic scene's `start` to 0 and a shorter `stagger`.
 - `[error] scene N: unknown type`: fix the type name (the error lists the valid ones); `[warn]` lines name the file that was replaced by a fallback.
 - QA "element outside the safe band": move it with the scene's `pos`, shorten the copy, or accept it for non-text graphics (the warning is informational).
+- A gallery screenshot is cut badly: aim it with `focus` in the item's `src` spec, or use the phone for tall screenshots and the laptop for wide ones.
+- The wall shows its edges or tiles look stretched: set `tile_ratio` to the screenshots' real height/width and add `rows`; the wall is scaled to cover the frame.
+- The typing bar finishes too late: raise `cps` or shorten the `prompt` (the scene grows to fit it).
 - A logo shows a square box behind it: it is opaque with a non-uniform background; supply a transparent PNG (`logo_bg: keep` turns off the automatic corner removal).
 
 ## Engine
