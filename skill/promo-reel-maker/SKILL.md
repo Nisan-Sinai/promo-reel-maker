@@ -297,7 +297,7 @@ Send the MP4 and a preview image (8 key frames from the final file, or the cover
 
 ## 7. Limits (say them plainly instead of faking them)
 
-- Generated narration only through Gemini text-to-speech (prebuilt voices, the user's free API key, section 4b); no voice cloning and no imitation of real people. Without a key or network access to Google, narration needs a recording from the user.
+- Generated narration only through ElevenLabs or Gemini text-to-speech (their built-in voices, the user's own free API key, section 4b); no voice cloning and no imitation of real people. Without a key or network access to them, narration needs a recording from the user.
 - No generative video and no stock-footage downloads: visuals are the user's footage/photos/screenshots, motion graphics and the illustrative device UI.
 - No paid tools: budget 0 - no credits, subscriptions or charges. Music and SFX come from free licensed libraries (Soundza); say when a track is AI-generated.
 - The illustrative UI is not a real product: label it, or use real screenshots.
