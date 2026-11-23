@@ -10,7 +10,7 @@ from concurrent.futures import ProcessPoolExecutor
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, features
 
-VERSION = "3.1.0"
+VERSION = "4.0.0"
 SEED_SALT = "3.0.0"  # frozen: keeps random choices stable across engine versions
 FFMPEG = shutil.which("ffmpeg") or "ffmpeg"
 SR = 48000
@@ -280,6 +280,25 @@ class Ctx:
         self.brand = brief.get("brand", {})
         self._panel = None
         self._logo = None
+        # motion style: "premium" (smooth, cinematic) or "hype" (beat hits, shake, glitch; energy 1-3)
+        fx = brief.get("fx", 0)
+        style, energy = None, 0
+        if isinstance(fx, dict):
+            style, energy = fx.get("style"), fx.get("energy", 0)
+        elif isinstance(fx, str):
+            v = fx.lower().strip()
+            if v in ("premium", "pro", "cinematic", "smooth"):
+                style = "premium"
+            else:
+                energy = {"off": 0, "none": 0, "low": 1, "medium": 2, "high": 2, "hype": 2, "crazy": 3, "max": 3}.get(v, 0)
+        else:
+            energy = fx or 0
+        if style is None and energy:
+            style = "hype"
+        if style == "hype" and not energy:
+            energy = 2
+        self.premium = style == "premium"
+        self.energy = int(max(0, min(3, float(energy or 0)))) if style == "hype" else 0
 
     def font(self, role, size):
         return get_font(self.ts[role], size * self.U)
@@ -741,13 +760,157 @@ def e_inout(p):
     return 4 * p ** 3 if p < 0.5 else 1 - (-2 * p + 2) ** 3 / 2
 
 
+def beat_env(ctx, t):
+    """1 on a beat of the current scene, decaying over about 0.15 s (0 without fx energy or music)."""
+    bs = getattr(ctx, "_beats_now", None)
+    if not bs:
+        return 0.0
+    last = None
+    for b in bs:
+        if b <= t:
+            last = b
+        else:
+            break
+    return math.exp(-(t - last) / 0.13) if last is not None else 0.0
+
+
 class Sprite:
     def __init__(self, img, cx, cy, t0=0.0, anim="up", d=0.35, rtl=True, pulse=0.0, scale_fn=None):
         self.img, self.cx, self.cy, self.t0, self.anim, self.d = img, cx, cy, t0, anim, d
         self.arr = np.asarray(img)
         self.rtl, self.pulse, self.scale_fn = rtl, pulse, scale_fn
 
+    def _pose(self, t, ctx):
+        """Energy-mode pose (fx energy >= 2): bigger, overshooting entrances, then the element keeps floating
+        and bounces on the beat. Returns (alpha, dx, dy, scale, progress) or None before the entrance."""
+        if t < self.t0:
+            return None
+        p = clamp((t - self.t0) / self.d)
+        U, k = ctx.U, self.anim
+        a, dx, dy, s = 1.0, 0.0, 0.0, 1.0
+        if k in ("up", "down"):
+            e = e_back(p, 2.0)
+            a, dy = clamp(p * 2.5), (1 - e) * 170 * U * (1 if k == "up" else -1)
+        elif k in ("left", "right"):
+            e = e_back(p, 2.0)
+            a, dx = clamp(p * 2.5), (1 - e) * 220 * U * (-1 if k == "left" else 1)
+        elif k in ("pop", "fade"):
+            a, s = clamp(p * 3), 0.25 + 0.75 * e_back(p, 2.6)
+        elif k == "zoom":
+            a, s = clamp(p * 2.5), 1.9 - 0.9 * e_back(p, 1.8)
+        elif k == "slam":
+            a, s = clamp(p * 4), 3.0 - 2.0 * (p * p)
+        if p >= 1:
+            ph = self.cx * 0.013 + self.cy * 0.007
+            dy += math.sin(t * 2.4 + ph) * 5 * U
+            s *= 1 + 0.008 * math.sin(t * 1.7 + ph)
+        s *= 1 + 0.035 * (ctx.energy / 2.0) * beat_env(ctx, t)
+        if self.pulse and p >= 1:
+            s *= 1 + self.pulse * math.sin((t - self.t0 - self.d) * 6.0)
+        if self.scale_fn:
+            s *= self.scale_fn(t)
+        ry = rx = 0.0
+        if self.arr.shape[0] * self.arr.shape[1] >= 0.03 * ctx.W * ctx.H:
+            # big elements (cards, large tags, buttons) flip in and keep swaying in 3D
+            ph = self.cx * 0.011 + self.cy * 0.005
+            if k != "slam" and p < 1:
+                ry = (1 - e_back(p, 1.6)) * 70 * (1 if self.cx <= ctx.W / 2 else -1)
+            ry += 5 * math.sin(t * 1.4 + ph)
+            rx = 2.5 * math.sin(t * 1.1 + ph * 1.3)
+        return a, dx, dy, s, p, ry, rx
+
+    def _blit(self, out, s, dx, dy, a, ry=0.0, rx=0.0):
+        arr, img = self.arr, self.img
+        h, w = arr.shape[:2]
+        if abs(s - 1) > 0.004:
+            nw, nh = max(1, int(w * s)), max(1, int(h * s))
+            img = self.img.resize((nw, nh), Image.BILINEAR)
+            arr = np.asarray(img)
+            h, w = nh, nw
+        if abs(ry) > 0.05 or abs(rx) > 0.05:
+            img = tilt(img.convert("RGBA") if img.mode != "RGBA" else img, ry, rx)
+            arr = np.asarray(img)
+            h, w = arr.shape[:2]
+        over(out, arr, self.cx - w / 2 + dx, self.cy - h / 2 + dy, a)
+
+    def _pose_premium(self, t, ctx):
+        """Premium pose: slower, smooth expo ease, small travel; big elements tilt in once in 3D, then hold."""
+        if t < self.t0:
+            return None
+        d = max(self.d, 0.55)
+        p = clamp((t - self.t0) / d)
+        e = e_expo(p)
+        U, k = ctx.U, self.anim
+        a, dx, dy, s = clamp(p * 2.2), 0.0, 0.0, 1.0
+        if k in ("up", "down"):
+            dy = (1 - e) * 60 * U * (1 if k == "up" else -1)
+        elif k in ("left", "right"):
+            dx = (1 - e) * 80 * U * (-1 if k == "left" else 1)
+        elif k in ("pop", "fade"):
+            s = 0.92 + 0.08 * e
+        elif k == "zoom":
+            s = 1.1 - 0.1 * e
+        elif k == "slam":
+            a, s = clamp(p * 3), 1.25 - 0.25 * e
+        if self.pulse and p >= 1:
+            s *= 1 + self.pulse * math.sin((t - self.t0 - d) * 6.0)
+        if self.scale_fn:
+            s *= self.scale_fn(t)
+        ry = rx = 0.0
+        if self.arr.shape[0] * self.arr.shape[1] >= 0.03 * ctx.W * ctx.H and k != "slam":
+            ry, rx = (1 - e) * 22 * (1 if self.cx <= ctx.W / 2 else -1), (1 - e) * 8
+        return a, dx, dy, s, p, ry, rx, d
+
+    def _sheen(self, out, t, ctx, d):
+        """One soft light sweep across a big element after it lands."""
+        q = (t - self.t0 - d - 0.1) / 0.75
+        if not 0 < q < 1:
+            return
+        h, w = self.arr.shape[:2]
+        if getattr(self, "_u", None) is None:
+            yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+            self._u = (xx + (h - yy) * 0.5) / (w + h * 0.5)
+        c = -0.2 + 1.4 * e_inout(q)
+        band = np.exp(-((self._u - c) / 0.07) ** 2) * (self.arr[..., 3].astype(np.float32) / 255.0) * 0.32
+        sh = np.zeros((h, w, 4), np.uint8)
+        sh[..., :3] = 255
+        sh[..., 3] = (band * 255).astype(np.uint8)
+        over(out, sh, self.cx - w / 2, self.cy - h / 2)
+
     def draw(self, out, t, ctx, bgf=None):
+        if getattr(ctx, "premium", False) and self.anim not in ("none", "wipe"):
+            pose = self._pose_premium(t, ctx)
+            if pose is None:
+                return
+            a, dx, dy, s, p, ry, rx, d = pose
+            if p < 1:
+                prev = self._pose_premium(t - 1.0 / ctx.fps, ctx)
+                if prev is not None:
+                    vx, vy = abs(dx - prev[1]), abs(dy - prev[2])
+                    if max(vx, vy) >= 2:
+                        img = self.img
+                        if abs(s - 1) > 0.004:
+                            img = img.resize((max(1, int(img.width * s)), max(1, int(img.height * s))), Image.BILINEAR)
+                        if abs(ry) > 0.05 or abs(rx) > 0.05:
+                            img = tilt(img, ry, rx)
+                        arr = hblur(np.asarray(img), int(max(vx, vy) * 1.5), 0 if vy >= vx else 1)
+                        over(out, arr, self.cx - arr.shape[1] / 2 + dx, self.cy - arr.shape[0] / 2 + dy, a)
+                        return
+            self._blit(out, s, dx, dy, a, ry, rx)
+            if p >= 1 and self.arr.shape[0] * self.arr.shape[1] >= 0.03 * ctx.W * ctx.H and abs(s - 1) <= 0.004:
+                self._sheen(out, t, ctx, d)
+            return
+        if getattr(ctx, "energy", 0) >= 2 and self.anim not in ("none", "wipe"):
+            pose = self._pose(t, ctx)
+            if pose is None:
+                return
+            if pose[4] < 1:
+                for j, ga in ((3, 0.12), (2, 0.22), (1, 0.38)):
+                    g = self._pose(t - 0.03 * j, ctx)
+                    if g is not None:
+                        self._blit(out, g[3], g[1], g[2], g[0] * ga, g[5], g[6])
+            self._blit(out, pose[3], pose[1], pose[2], pose[0], pose[5], pose[6])
+            return
         if t < self.t0 and self.anim != "none":
             return
         p = clamp((t - self.t0) / self.d) if self.anim != "none" else 1.0
@@ -2011,6 +2174,90 @@ def tilt(img, ry=0.0, rx=0.0, dist=2.4):
     return img.transform((bw, bh), Image.PERSPECTIVE, co, Image.BICUBIC)
 
 
+def tilt_mapper(w, h, ry=0.0, rx=0.0, dist=2.4):
+    """Point mapping that matches tilt(): (x, y) in the flat w x h image -> position in the tilted image."""
+    if abs(ry) < 0.05 and abs(rx) < 0.05:
+        return lambda x, y: (x, y)
+    d = dist * max(w, h)
+    ay, ax = math.radians(ry), math.radians(rx)
+
+    def raw(x, y):
+        x1, z1 = x * math.cos(ay), x * math.sin(ay)
+        y1, z2 = y * math.cos(ax) - z1 * math.sin(ax), y * math.sin(ax) + z1 * math.cos(ax)
+        f = d / (d + z2)
+        return x1 * f, y1 * f
+    pts = [raw(x, y) for (x, y) in ((-w / 2, -h / 2), (w / 2, -h / 2), (w / 2, h / 2), (-w / 2, h / 2))]
+    mx, my = min(q[0] for q in pts), min(q[1] for q in pts)
+
+    def f_(x, y):
+        X, Y = raw(x - w / 2, y - h / 2)
+        return X - mx, Y - my
+    return f_
+
+
+def card_quad(cx, cy, w, h, ry=0.0, rx=0.0, dist=2.4):
+    """Corners (TL, TR, BR, BL) of a w x h card centred at (cx, cy), rotated in 3D like tilt()."""
+    d = dist * max(w, h)
+    ay, ax = math.radians(ry), math.radians(rx)
+    out = []
+    for (x, y) in ((-w / 2, -h / 2), (w / 2, -h / 2), (w / 2, h / 2), (-w / 2, h / 2)):
+        x1, z1 = x * math.cos(ay), x * math.sin(ay)
+        y1, z2 = y * math.cos(ax) - z1 * math.sin(ax), y * math.sin(ax) + z1 * math.cos(ax)
+        f = d / (d + z2)
+        out.append((cx + x1 * f, cy + y1 * f))
+    return out
+
+
+def pop_box(fr):
+    """The most detailed block of a screenshot (headline, card, form) for the pop-out effect: (x0, y0, x1, y1)."""
+    h, w = fr.shape[:2]
+    gw = 96
+    gh = max(8, int(gw * h / w))
+    g_ = np.asarray(Image.fromarray(fr).convert("L").resize((gw, gh), Image.BILINEAR), np.float32)
+    g = np.abs(np.diff(g_, axis=0))[:, :-1] + np.abs(np.diff(g_, axis=1))[:-1]
+    sh_, sw_ = g.shape
+    I = np.pad(g.cumsum(0).cumsum(1), ((1, 0), (1, 0)))
+    best, bb = -1.0, (int(w * 0.25), int(h * 0.3), int(w * 0.75), int(h * 0.6))
+    for fw in (0.42, 0.52, 0.62):
+        bw = max(4, int(sw_ * fw))
+        for ar in (0.4, 0.6, 0.85):
+            bh = min(int(sh_ * 0.6), max(4, int(bw * ar)))
+            for y0 in range(1, sh_ - bh, 2):
+                for x0 in range(1, sw_ - bw, 2):
+                    tot = I[y0 + bh, x0 + bw] - I[y0, x0 + bw] - I[y0 + bh, x0] + I[y0, x0]
+                    cxn = (x0 + bw / 2) / sw_ - 0.5
+                    cyn = (y0 + bh / 2) / sh_ - 0.5
+                    sc = tot / (bw * bh) ** 0.7 * (1 - 0.9 * (cxn * cxn + cyn * cyn))
+                    if y0 < sh_ * 0.1:
+                        sc *= 0.6
+                    if sc > best:
+                        best, bb = sc, (x0, y0, x0 + bw, y0 + bh)
+    if best < 0:
+        return bb
+    # grow each edge while it still cuts through detail (text, photos), so the piece ends on calm space
+    x0, y0, x1, y1 = bb
+    dens = (I[y1, x1] - I[y0, x1] - I[y1, x0] + I[y0, x0]) / max(1, (x1 - x0) * (y1 - y0))
+    lim = 0.35 * dens
+    for _ in range(sw_ + sh_):
+        grown = False
+        if x0 > 0 and g[y0:y1, x0 - 1].mean() > lim and (x1 - x0) < sw_ * 0.85:
+            x0 -= 1
+            grown = True
+        if x1 < sw_ and g[y0:y1, x1 - 1 if x1 == sw_ else x1].mean() > lim and (x1 - x0) < sw_ * 0.85:
+            x1 += 1
+            grown = True
+        if y0 > 0 and g[y0 - 1, x0:x1].mean() > lim and (y1 - y0) < sh_ * 0.7:
+            y0 -= 1
+            grown = True
+        if y1 < sh_ and g[y1 - 1 if y1 == sh_ else y1, x0:x1].mean() > lim and (y1 - y0) < sh_ * 0.7:
+            y1 += 1
+            grown = True
+        if not grown:
+            break
+    x0, y0, x1, y1 = max(0, x0 - 1), max(0, y0 - 1), min(sw_, x1 + 1), min(sh_, y1 + 1)
+    return (int(x0 * w / sw_), int(y0 * h / sh_), int(x1 * w / sw_), int(y1 * h / sh_))
+
+
 def _txt(ctx, text, role, px, color):
     if role == "mono" and is_rtl(text):
         role = "heavy"
@@ -2140,6 +2387,7 @@ def device_img(ctx, kind, screen, width):
         out.alpha_composite(lid, ((W - lid.width) // 2, 0))
         ImageDraw.Draw(out).polygon([(0, out.height - 1), (W - 1, out.height - 1), (W - (W - lid.width) // 2 + bez, lid.height),
                                      ((W - lid.width) // 2 - bez, lid.height)], fill=(34, 40, 52, 255))
+        out.info["screen"] = ((W - lid.width) // 2 + bez, bez, sw, sh)
         return out
     h = int(W * 2.05)
     bez = int(W * 0.035)
@@ -2152,6 +2400,7 @@ def device_img(ctx, kind, screen, width):
     out.alpha_composite(scr, (bez, bez))
     pw, ph = int(W * 0.3), int(W * 0.075)
     d.rounded_rectangle(((W - pw) // 2, bez + int(W * 0.03), (W + pw) // 2, bez + int(W * 0.03) + ph), ph // 2, fill=(0, 0, 0, 255))
+    out.info["screen"] = (bez, bez, sw, sh)
     return out
 
 
@@ -2269,9 +2518,17 @@ def b_kinetic(sc, ctx):
     if sc.get("clip"):
         els.append(scrim_el(ctx, "center", 0.35, 0.7))
     st0, stag = float(sc.get("start", 0.06)), float(sc.get("stagger", 0.16))
+    hot = ctx.energy >= 2
+    if hot:
+        stag = max(stag, 0.22)
+    hits = []
     for j, ((im, cy), st, spec) in enumerate(zip(lay, styles, specs)):
         t0 = st0 + stag * j
-        els.append(reveal_line(im, W / 2, cy, t0))
+        if hot:
+            els.append(Sprite(im, W / 2, cy, t0, "slam", 0.26))
+            hits.append((t0 + 0.2, "thump", 0.35))
+        else:
+            els.append(reveal_line(im, W / 2, cy, t0))
         if st == "accent" and sc.get("underline", True) and spec.get("underline", True):
             uw, uh = int(im.width * 0.62), max(3, int(8 * U))
             bar = np.asarray(pe_grad_box(uw, uh, [ctx.c["primary"], ctx.c["primary2"]], uh // 2))
@@ -2283,7 +2540,7 @@ def b_kinetic(sc, ctx):
                 if vis > 1:
                     over(out, bar[:, uw - vis:], W / 2 + uw / 2 - vis, ty)
             els.append(Fn(ul))
-    return bg, els, [(st0 + 0.02, "whoosh", 0.3)]
+    return bg, els, [(st0 + 0.02, "whoosh", 0.3)] + hits
 
 
 def card_img(ctx, item, w, h, idx):
@@ -2726,7 +2983,7 @@ def b_gallery(sc, ctx):
     n = max(1, len(items))
     per, t_in = float(sc.get("per", 0.7)), 0.45
     kind = sc.get("device", "phone")
-    dw = W * (0.46 if kind == "phone" else 0.86) * float(sc.get("device_scale", 1.0)) * (0.62 if ctx.land else 1)
+    dw = W * ((0.5 if ctx.premium else 0.46) if kind == "phone" else 0.86) * float(sc.get("device_scale", 1.0)) * (0.62 if ctx.land else 1)
     if kind == "phone":
         sw, sh = int(dw * 0.93), int(dw * 2.05 - dw * 0.07)
     else:
@@ -2744,6 +3001,8 @@ def b_gallery(sc, ctx):
         if i not in readers:
             spec = norm_clip(items[i]["src"])
             spec.setdefault("fit", "cover")
+            if pops[i] is not None and pops[i]["box"] and is_photo(spec["src"]):
+                spec.setdefault("move", "still")
             if is_photo(spec["src"]) and "move" not in spec:
                 iw, ih = Image.open(spec["src"]).size
                 if ih / iw > (sh / sw) * 1.15:
@@ -2774,7 +3033,8 @@ def b_gallery(sc, ctx):
                                 highlight=it.get("highlight", ()), max_w=W * 0.86)
                 lab = finish(lab, lab.getchannel("A"), 0.6, U=U)
             else:
-                lab = pill(ctx, it["label"], None, 38, bg=ctx.c["primary"] + (255,), fg=ink_for(ctx.c["primary"]))
+                lab = pill(ctx, it["label"], None, sc.get("label_size", 44 if ctx.premium else 38), bg=ctx.c["primary"] + (255,),
+                           fg=ink_for(ctx.c["primary"]))
             tag = pill(ctx, it["tag"], it.get("icon", "web"), 34, bg=(18, 14, 32, 238), fg=(255, 255, 255)) if it.get("tag") else None
             head_cache[i] = (np.asarray(cnt), np.asarray(lab) if lab else None, np.asarray(tag) if tag else None)
         return head_cache[i]
@@ -2783,9 +3043,127 @@ def b_gallery(sc, ctx):
     d0 = device_img(ctx, kind, Image.new("RGBA", (sw, sh), (20, 20, 28, 255)), dw)
     headline = sc.get("label_style", "pill" if (kind == "phone" or ctx.land) else "headline") == "headline"
     dev_cy = ctx.top + (ctx.bot - ctx.top) * (0.58 if kind == "phone" else (0.43 if headline else 0.55))
+    pop_cfg = sc.get("pop", True if ctx.energy >= 2 else ("alternate" if ctx.premium else None))
+    lift_t = 0.55 if ctx.premium else 0.34
+
+    def pop_of(i):
+        v = items[i].get("pop")
+        if v is None and pop_cfg:
+            v = (i % 2 == 0) if pop_cfg == "alternate" else bool(pop_cfg)
+        if not v:
+            return None
+        d_ = v if isinstance(v, dict) else {}
+        return {"box": d_.get("box"), "at": float(d_.get("at", 0.3 if ctx.premium else 0.22)),
+                "scale": float(d_.get("scale", 1.35 if ctx.premium else 1.8)), "radius": d_.get("radius")}
+    pops = [pop_of(i) for i in range(n)]
+    pop_boxes = {}
+
+    def draw_pop(out, i, u, fr, dev, im, ry, rx, ox_, oy_, dur_i):
+        pp = pops[i]
+        if pp is None or u < pp["at"]:
+            return
+        if i not in pop_boxes:
+            src_piece = None
+            spec_i = norm_clip(items[i]["src"])
+            if pp["box"] and is_photo(spec_i["src"]) and spec_i.get("move", "still") == "still":
+                # an exact element box (e.g. measured in the browser): cut the piece from the original at full
+                # resolution and map it onto the screen the way Reader frames a still photo
+                b = pp["box"]
+                from PIL import ImageOps
+                src_im = ImageOps.exif_transpose(Image.open(spec_i["src"])).convert("RGB")
+                iw, ih = src_im.size
+                fh, fw_ = fr.shape[:2]
+                sc_ = max(fw_ / iw, fh / ih) * 1.02
+                bw_, bh_ = max(fw_, round(iw * sc_)), max(fh, round(ih * sc_))
+                fxf, fyf = spec_i.get("focus", [0.5, 0.45])
+                cxs = min(max(bw_ * fxf, fw_ / 2), bw_ - fw_ / 2)
+                cys = min(max(bh_ * fyf, fh / 2), bh_ - fh / 2)
+                mx_, my_ = bw_ / iw, bh_ / ih
+                pop_boxes[i] = (int(b[0] * iw * mx_ - (cxs - fw_ / 2)), int(b[1] * ih * my_ - (cys - fh / 2)),
+                                int(b[2] * iw * mx_ - (cxs - fw_ / 2)), int(b[3] * ih * my_ - (cys - fh / 2)))
+                src_piece = src_im.crop((int(b[0] * iw), int(b[1] * ih), int(b[2] * iw), int(b[3] * ih)))
+                if pp.get("radius") is not None:
+                    pp["_r"] = max(2, int(float(pp["radius"]) * iw))
+            elif pp["box"]:
+                b = pp["box"]
+                pop_boxes[i] = (int(b[0] * fr.shape[1]), int(b[1] * fr.shape[0]), int(b[2] * fr.shape[1]), int(b[3] * fr.shape[0]))
+            else:
+                pop_boxes[i] = pop_box(fr)
+            pp["_piece"] = src_piece
+        x0, y0, x1, y1 = pop_boxes[i]
+        if x1 - x0 < 8 or y1 - y0 < 8:
+            return
+        sx, sy, ssw, ssh = dev.info["screen"]
+        kx, ky = ssw / fr.shape[1], ssh / fr.shape[0]
+        mp = tilt_mapper(dev.width, dev.height, ry, rx)
+
+        def to_out(a, b):
+            X, Y = mp(sx + a * kx, sy + b * ky)
+            return X + ox_, Y + oy_
+        q0 = [to_out(x0, y0), to_out(x1, y0), to_out(x1, y1), to_out(x0, y1)]
+        lp = clamp((u - pp["at"]) / lift_t)
+        e, ea = (e_expo(lp), e_cubic(lp)) if ctx.premium else (e_back(lp), e_cubic(lp))
+        fa = 1.0 if i == n - 1 else clamp((dur_i - u) / 0.1)
+        if fa <= 0:
+            return
+        w0 = math.hypot(q0[1][0] - q0[0][0], q0[1][1] - q0[0][1])
+        h0 = math.hypot(q0[3][0] - q0[0][0], q0[3][1] - q0[0][1])
+        wt = min(W * 0.86, w0 * pp["scale"])
+        ht = wt * h0 / max(1.0, w0)
+        cap = H * (0.42 if ctx.premium else 0.34)
+        if ht > cap:
+            wt, ht = wt * cap / ht, cap
+        side = 1 if i % 2 else -1
+        cx0 = sum(q[0] for q in q0) / 4
+        cy0 = sum(q[1] for q in q0) / 4
+        if ctx.premium:
+            # glide out toward the viewer and past the side of the device, with a gentle 3D turn
+            out_x = cx0 + (1 if cx0 >= W / 2 else -1) * W * 0.12
+            cxt = min(max(out_x, W * 0.03 + wt / 2), W * 0.97 - wt / 2)
+            cyt = min(max(cy0 - H * 0.02, ctx.top + ht / 2 + 10 * U), ctx.bot - ht / 2)
+            q1 = card_quad(cxt, cyt, wt, ht, (-10 if cxt >= W / 2 else 10), -4)
+        else:
+            cxt = min(max(W / 2 + side * W * 0.05, W * 0.03 + wt / 2), W * 0.97 - wt / 2)
+            # rise until the piece sticks out over the top edge of the device
+            cyt = max(ctx.top + ht / 2 + 10 * U, min(cy0 - H * 0.06, oy_ + ht * 0.3))
+            q1 = card_quad(cxt, cyt, wt, ht, -side * 14, -8)
+        q = [(a[0] + (b[0] - a[0]) * e, a[1] + (b[1] - a[1]) * e) for a, b in zip(q0, q1)]
+        # the piece itself (full resolution when cut from the original), with its real corner radius
+        if pp.get("_piece") is not None:
+            piece = pp["_piece"].convert("RGBA")
+        else:
+            piece = Image.fromarray(np.ascontiguousarray(fr[y0:y1, x0:x1])).convert("RGBA")
+        rr = pp.get("_r") or max(4, int(min(piece.width, piece.height) * 0.06))
+        piece.putalpha(rounded_mask(piece.width, piece.height, rr))
+        if not ctx.premium:
+            ImageDraw.Draw(piece).rounded_rectangle((0, 0, piece.width - 1, piece.height - 1), rr, outline=(255, 255, 255, 235),
+                                                    width=max(2, int(3 * piece.width / max(1.0, wt))))
+        # the slot it leaves behind: the same rounded shape, darkened
+        hx0, hy0 = int(min(x for x, _ in q0)) - 1, int(min(y for _, y in q0)) - 1
+        hx1, hy1 = int(max(x for x, _ in q0)) + 2, int(max(y for _, y in q0)) + 2
+        hco = _persp_coeffs([(x - hx0, y - hy0) for x, y in q0], [(0, 0), (piece.width, 0), (piece.width, piece.height), (0, piece.height)])
+        ha_ = piece.getchannel("A").transform((max(1, hx1 - hx0), max(1, hy1 - hy0)), Image.PERSPECTIVE, hco, Image.BILINEAR)
+        hole = Image.new("RGBA", ha_.size, (6, 6, 12, 0))
+        hole.putalpha(ha_)
+        over(out, np.asarray(hole), hx0, hy0, (0.38 if ctx.premium else 0.75) * ea * fa)
+        bx0, by0 = int(min(x for x, _ in q)) - 2, int(min(y for _, y in q)) - 2
+        bx1, by1 = int(max(x for x, _ in q)) + 3, int(max(y for _, y in q)) + 3
+        co = _persp_coeffs([(x - bx0, y - by0) for x, y in q], [(0, 0), (piece.width, 0), (piece.width, piece.height), (0, piece.height)])
+        wp = piece.transform((max(1, bx1 - bx0), max(1, by1 - by0)), Image.PERSPECTIVE, co, Image.BICUBIC)
+        pad = int(40 * U)
+        al = Image.new("L", (wp.width + 2 * pad, wp.height + 2 * pad))
+        al.paste(wp.getchannel("A"), (pad, pad))
+        blur = al.filter(ImageFilter.GaussianBlur((26 if ctx.premium else 18) * U))
+        shd = Image.new("RGBA", al.size, (0, 0, 0, 0))
+        shd.putalpha(blur.point(lambda v: int(v * (0.7 if ctx.premium else 0.6))))
+        over(out, np.asarray(shd), bx0 - pad + (14 if ctx.premium else 20) * U * ea, by0 - pad + (40 if ctx.premium else 44) * U * ea, ea * fa)
+        glw = Image.new("RGBA", al.size, ctx.c["primary"] + (0,))
+        glw.putalpha(al.filter(ImageFilter.GaussianBlur((16 if ctx.premium else 10) * U)).point(lambda v: int(v * (0.3 if ctx.premium else 0.8))))
+        over(out, np.asarray(glw), bx0 - pad, by0 - pad, ea * fa)
+        over(out, np.asarray(wp), bx0, by0, fa)
     head_y = ctx.top + 40 * U
     gl = glow_blob(ctx, d0.width * 1.5, d0.height * 0.9, ctx.c["primary2"], 0.45)
-    swing = float(sc.get("swing", 9))
+    swing = float(sc.get("swing", 4 if ctx.premium else 9))
 
     def draw(out, t, bgf):
         i = idx(t)
@@ -2802,11 +3180,13 @@ def b_gallery(sc, ctx):
         dev = device_img(ctx, kind, Image.fromarray(fr).convert("RGBA"), dw)
         tgt = swing * (1 if i % 2 else -1)
         prv = swing * (1 if (i - 1) % 2 else -1) if i else -swing * 2.4
-        ry = prv + (tgt - prv) * e_cubic(clamp(u / 0.3)) + 1.2 * math.sin(t * 1.3)
+        ry = prv + (tgt - prv) * (e_inout(clamp(u / 0.6)) if ctx.premium else e_cubic(clamp(u / 0.3))) + 1.2 * math.sin(t * 1.3)
         rx = 4 + (1 - e) * 16 + 1.5 * math.sin(t * 0.9)
         im = tilt(dev, ry, rx)
         dy = (1 - e) * H * 0.3 + math.sin(t * 1.6) * 6 * U
         over(out, np.asarray(im), W / 2 - im.width / 2, dev_cy - im.height / 2 + dy, a)
+        pop_args = (i, u, fr, dev, im, ry, rx, W / 2 - im.width / 2, dev_cy - im.height / 2 + dy,
+                    (total - start_of(i)) if i == n - 1 else (start_of(i + 1) - start_of(i)))
         cnt, lab, tag = heads(i)
         bump = 1.0 if u > 0.18 else 0.85 + 0.15 * e_back(u / 0.18)
         ha = clamp((t - 0.15) / 0.3)
@@ -2827,7 +3207,10 @@ def b_gallery(sc, ctx):
                 arr = np.asarray(img)
             cx_ = x - arr.shape[1] / 2 if x > W * 0.6 else x
             over(out, arr, cx_ - arr.shape[1] / 2, y - arr.shape[0] / 2, ha)
+        draw_pop(out, *pop_args)
     sfx = [(0.05, "whoosh", 0.45)] + [(start_of(i), "click", 0.35) for i in range(1, n)]
+    sfx += [(start_of(i) + pops[i]["at"], "whoosh" if ctx.premium else "pop", 0.25 if ctx.premium else 0.5)
+            for i in range(n) if pops[i] is not None]
     return bg, [Fn(draw)], sfx
 
 
@@ -3026,9 +3409,17 @@ DEFAULT_TRANS = {"kinetic": "blur", "cards": "zoom", "steps": "slide_up", "devic
                  "showcase": "slide", "features": "zoom", "location": "zoom", "hook": "cut", "stamp": "glitch", "logo": "zoom", "title": "whip", "collage": "zoom",
                  "counter": "slide_up", "checklist": "zoom", "testimonial": "fade", "before_after": "whip",
                  "offer": "flash", "text": "punch", "cta": "zoom"}
-TRANS_SFX = {"zoom": "whoosh", "whip": "whoosh", "slide": "whoosh", "slide_up": "whoosh", "glitch": "glitch", "flash": "thump", "punch": "thump"}
+TRANS_SFX = {"zoom": "whoosh", "whip": "whoosh", "slide": "whoosh", "slide_up": "whoosh", "glitch": "glitch", "flash": "thump", "punch": "thump",
+             "cube": "whoosh", "spin": "whoosh", "zoom_blur": "whoosh", "slices": "whoosh", "shape": "whoosh", "diamond": "whoosh",
+             "push": "whoosh", "zoom_through": "whoosh"}
 TRANS_LEN = {"flash": 6, "zoom": 9, "whip": 9, "slide": 9, "slide_up": 9, "glitch": 7, "punch": 8, "fade": 9,
-             "leak": 14, "blur": 10}
+             "leak": 14, "blur": 10, "cube": 15, "spin": 10, "zoom_blur": 10, "slices": 12, "shape": 12, "diamond": 12,
+             "push": 14, "zoom_through": 14}
+# transitions rotated through automatically when fx energy >= 2 (scenes without their own transition)
+CRAZY_TRANS = ["cube", "zoom_blur", "slices", "spin", "shape", "whip", "diamond", "glitch"]
+# premium style: one consistent family, chosen by what the next scene is (scenes without their own transition)
+PREMIUM_TRANS = {"gallery": "zoom_through", "wall": "zoom_through", "cta": "zoom_through", "logo": "zoom_through",
+                 "bundle": "cube", "cards": "cube", "device": "cube"}
 
 
 # ----------------------------------------------------------------- transitions
@@ -3052,7 +3443,107 @@ def scale_frame(fr, s):
     return np.array(Image.fromarray(fr).transform((W, H), Image.AFFINE, (a, 0, W * (1 - a) / 2, 0, a, H * (1 - a) / 2), Image.BILINEAR))
 
 
-def transition(kind, out, prev, k, U, rng):
+def affine_frame(fr, s=1.0, rot=0.0, dx=0.0, dy=0.0):
+    """Scale (about the centre), rotate (degrees) and shift a frame; the scale is raised as needed so no edge shows."""
+    H, W = fr.shape[:2]
+    a = math.radians(rot)
+    ca, sa = math.cos(a), abs(math.sin(a))
+    s = max(s, max(ca + H / W * sa, ca + W / H * sa) + 2 * max(abs(dx) / W, abs(dy) / H))
+    c, sn = math.cos(-a) / s, math.sin(-a) / s
+    cx, cy = W / 2, H / 2
+    A = (c, -sn, cx - c * (cx + dx) + sn * (cy + dy), sn, c, cy - sn * (cx + dx) - c * (cy + dy))
+    return np.asarray(Image.fromarray(fr).transform((W, H), Image.AFFINE, A, Image.BILINEAR))
+
+
+_DIST = {}
+
+
+def _dist_map(W, H, kind):
+    """Distance from the frame centre, 1.0 at the corners (circle) or along the diagonal edges (diamond)."""
+    key = (W, H, kind)
+    if key not in _DIST:
+        yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
+        cx, cy = W / 2, H / 2
+        if kind == "diamond":
+            _DIST[key] = (np.abs(xx - cx) + np.abs(yy - cy)) / (cx + cy)
+        else:
+            _DIST[key] = np.sqrt((xx - cx) ** 2 + (yy - cy) ** 2) / math.hypot(cx, cy)
+    return _DIST[key]
+
+
+def bg_energy(out, T, t, ctx):
+    """Energy background (fx energy >= 2): light streaks rising across the frame and a ring that bursts from the
+    centre on every beat, both in the theme colour and brighter on the beat. T = global time, t = scene time."""
+    W, H, U = ctx.W, ctx.H, ctx.U
+    w2, h2 = max(2, W // 2), max(2, H // 2)
+    if getattr(ctx, "_streaks", None) is None:
+        ctx._streaks = np.random.default_rng(3).random((14, 5))
+    m = Image.new("L", (w2, h2))
+    d = ImageDraw.Draw(m)
+    b = beat_env(ctx, t)
+    gain = 0.55 + 0.45 * b
+    ang = math.radians(-16)
+    for prm in ctx._streaks:
+        speed = 0.5 + 1.3 * prm[0]
+        L = (0.18 + 0.4 * prm[1]) * h2
+        x = prm[2] * (w2 * 1.3) - w2 * 0.15
+        y = h2 * 1.3 - ((prm[3] + T * speed) % 1.0) * h2 * 1.9
+        width = max(1, int((1 + 3 * prm[4]) * U))
+        d.line([(x, y), (x + L * math.sin(ang), y + L * math.cos(ang))], fill=int((70 + 130 * prm[4]) * gain), width=width)
+    for bt in getattr(ctx, "_beats_now", []):
+        x_ = t - bt
+        if 0 <= x_ < 0.55:
+            r = (0.05 + x_ / 0.55 * 0.85) * h2 * 0.75
+            d.ellipse((w2 / 2 - r, h2 / 2 - r, w2 / 2 + r, h2 / 2 + r), outline=int(170 * (1 - x_ / 0.55)), width=max(1, int(3 * U)))
+    m = m.filter(ImageFilter.GaussianBlur(1.3)).resize((W, H), Image.BILINEAR)
+    col = (np.array(ctx.c["primary"], np.float32) * 0.65 + 255 * 0.35) / 255.0
+    add = np.asarray(m, np.float32)[..., None] * col
+    return np.clip(out.astype(np.float32) + add, 0, 255).astype(np.uint8)
+
+
+def camera_fx(out, t, hits, ctx):
+    """Energy FX: zoom punches on beats and hits, camera shake and a chromatic split on strong hits."""
+    E = ctx.energy / 2.0
+    s, dx, dy, rot, ch = 1.0, 0.0, 0.0, 0.0, 0.0
+    glitch = None
+    for (th, strong, ph) in hits:
+        x = t - th
+        if x < 0 or x > 0.7:
+            continue
+        s += (0.08 if strong else (0.045 if strong is None else 0.03)) * E * math.exp(-x / 0.11)
+        if strong:
+            se = math.exp(-x / 0.14)
+            dx += 22 * ctx.U * E * se * (0.6 * math.sin(2 * math.pi * 17 * x + ph) + 0.4 * math.sin(2 * math.pi * 29 * x + 2 * ph))
+            dy += 16 * ctx.U * E * se * (0.6 * math.sin(2 * math.pi * 19 * x + 3 * ph) + 0.4 * math.sin(2 * math.pi * 31 * x + ph))
+            rot += 1.0 * E * se * math.sin(2 * math.pi * 11 * x + 5 * ph)
+            ch = max(ch, 10 * ctx.U * E * math.exp(-x / 0.07))
+            if x < 0.07:
+                glitch = (x, ph)
+    s = min(s, 1.2)
+    if s - 1 < 1e-3 and abs(dx) < 0.3 and abs(dy) < 0.3 and abs(rot) < 0.02 and ch < 0.5:
+        return out
+    out = affine_frame(out, s, rot, dx, dy)
+    c = int(round(ch))
+    if c >= 1 or glitch:
+        o = out.copy()
+        if c >= 1:
+            o[:, c:, 0] = out[:, :-c, 0]
+            o[:, :-c, 2] = out[:, c:, 2]
+        if glitch:
+            H, W = o.shape[:2]
+            g_ = np.random.default_rng(int(glitch[1] * 1000) + int(glitch[0] * 300))
+            for _ in range(2 + ctx.energy):
+                y0 = int(g_.integers(0, max(1, H - 20)))
+                hh = int(g_.integers(max(4, int(H * 0.01)), max(5, int(H * 0.05))))
+                o[y0:y0 + hh] = np.roll(o[y0:y0 + hh], int(g_.integers(-50, 50) * ctx.U), 1)
+            if ctx.energy >= 3:
+                f = 0.3 * math.exp(-glitch[0] / 0.035)
+                o = (o * (1 - f) + 255 * f).astype(np.uint8)
+        out = o
+    return out
+
+
+def transition(kind, out, prev, k, U, rng, ctx=None):
     m = TRANS_LEN.get(kind, 0)
     if kind == "cut" or k >= m:
         return out
@@ -3124,6 +3615,90 @@ def transition(kind, out, prev, k, U, rng):
             h = int(rng.integers(8, max(9, int(H * 0.06))))
             fr[y0:y0 + h] = np.roll(fr[y0:y0 + h], int(rng.integers(-60, 60) * U), 1)
         return fr
+    if kind == "push":
+        e = e_inout(p)
+        off = int(W * e)
+        fr = np.empty_like(out)
+        fr[:, off:] = prev[:, :W - off]
+        fr[:, :off] = out[:, W - off:]
+        return hblur(fr, int(60 * U * math.sin(math.pi * p) ** 2), 1)
+    if kind == "zoom_through":
+        e = e_inout(p)
+        a = scale_frame(prev, 1 + 0.4 * e)
+        b = scale_frame(out, 1.15 - 0.15 * e)
+        m = e_inout(clamp((p - 0.25) / 0.5))
+        mix = (a.astype(np.float32) * (1 - m) + b.astype(np.float32) * m).astype(np.uint8)
+        k = int(18 * U * math.sin(math.pi * p) ** 2)
+        return hblur(hblur(mix, k, 1), k, 0)
+    if kind == "cube":
+        th = math.pi / 2 * e_inout(p)
+        D = 2.2 * W * (1 + 0.3 * math.sin(math.pi * p))
+        Zc = D + W / 2
+
+        def proj(x, y, z):
+            x2, z2 = x * math.cos(th) - z * math.sin(th), x * math.sin(th) + z * math.cos(th)
+            f = D / (Zc + z2)
+            return (W / 2 + x2 * f, H / 2 + y * f)
+        small = Image.fromarray(out).resize((max(1, W // 24), max(1, H // 24)), Image.BILINEAR)
+        canvas = small.resize((W, H), Image.BILINEAR).point(lambda v: int(v * 0.3))
+        hw, hh = W / 2, H / 2
+        for img, pts, lit in ((prev, [(-hw, -hh, -hw), (hw, -hh, -hw), (hw, hh, -hw), (-hw, hh, -hw)], math.cos(th)),
+                              (out, [(-hw, -hh, hw), (-hw, -hh, -hw), (-hw, hh, -hw), (-hw, hh, hw)], math.sin(th))):
+            if lit < 0.03:
+                continue
+            co = _persp_coeffs([proj(*pt) for pt in pts], [(0, 0), (W, 0), (W, H), (0, H)])
+            src = Image.fromarray((img.astype(np.float32) * (0.35 + 0.65 * lit)).astype(np.uint8))
+            mask = Image.new("L", (W, H), 255).transform((W, H), Image.PERSPECTIVE, co, Image.BILINEAR)
+            canvas.paste(src.transform((W, H), Image.PERSPECTIVE, co, Image.BILINEAR), (0, 0), mask)
+        return np.asarray(canvas)
+    if kind == "spin":
+        e = e_inout(p)
+        v = math.sin(math.pi * p)
+        if p < 0.5:
+            src, ang, s = prev, 30 * (2 * e), 1 + 0.45 * (2 * e)
+        else:
+            src, ang, s = out, -30 * (2 - 2 * e), 1 + 0.45 * (2 - 2 * e)
+        acc = np.zeros((H, W, 3), np.float32)
+        for d in (-1, 0, 1):
+            acc += affine_frame(src, s, ang + d * 6 * v)
+        return (acc / 3).astype(np.uint8)
+    if kind == "zoom_blur":
+        if p < 0.5:
+            q, src = p / 0.5, prev
+        else:
+            q, src = (1 - p) / 0.5, out
+        z = 1 + 2.4 * q * q
+        acc = np.zeros((H, W, 3), np.float32)
+        for j in range(5):
+            acc += scale_frame(src, z * (1 + 0.12 * q * j / 4))
+        acc /= 5
+        fl = 0.4 * math.exp(-((p - 0.5) / 0.1) ** 2)
+        return np.clip(acc * (1 - fl) + 255 * fl, 0, 255).astype(np.uint8)
+    if kind == "slices":
+        n = 6
+        fr = prev.copy()
+        for j in range(n):
+            x0, x1 = W * (n - 1 - j) // n, W * (n - j) // n
+            pj = clamp((p - j * 0.07) / (1 - (n - 1) * 0.07))
+            if pj <= 0:
+                continue
+            off = int((1 - e_cubic(pj)) * H) * (1 if j % 2 else -1)
+            if off >= 0:
+                fr[off:, x0:x1] = out[:H - off, x0:x1]
+            else:
+                fr[:H + off, x0:x1] = out[-off:, x0:x1]
+        return fr
+    if kind in ("shape", "diamond"):
+        d = _dist_map(W, H, kind)
+        r = e_inout(p) * 1.08
+        m_ = np.clip((r - d) / 0.006 + 0.5, 0, 1)[..., None]
+        fr = prev.astype(np.float32) * (1 - m_) + out.astype(np.float32) * m_
+        col = np.array(ctx.c["primary"] if ctx is not None else (255, 255, 255), np.float32)
+        a1 = np.clip(1 - np.abs(d - r) / 0.016, 0, 1)[..., None]
+        a2 = np.clip(1 - np.abs(d - r * 0.8) / 0.006, 0, 1)[..., None] * 0.9
+        fr = fr * (1 - a1) + col * a1
+        fr = fr * (1 - a2) + 255 * a2
+        return np.clip(fr, 0, 255).astype(np.uint8)
     return out
 
 
@@ -3274,6 +3849,17 @@ def make_plan(brief, ctx, workdir):
         sc["_n"] = int(bounds[i + 1] - bounds[i])
         sc["_dur"] = sc["_n"] / ctx.fps
         sc["_t0"] = bounds[i] / ctx.fps
+        if ctx.premium:
+            sc["_premium"] = 1
+            if i and "transition" not in sc:
+                sc["transition"] = PREMIUM_TRANS.get(sc["type"], "push")
+        if ctx.energy:
+            sc["_energy"] = ctx.energy
+            if len(beats):
+                b = beats[(beats >= sc["_t0"] - 1e-3) & (beats < sc["_t0"] + sc["_dur"] - 0.05)] - sc["_t0"]
+                sc["_beats"] = [round(float(x), 3) for x in b]
+            if i and ctx.energy >= 2 and "transition" not in sc:
+                sc["transition"] = CRAZY_TRANS[(i - 1) % len(CRAZY_TRANS)]
         sc.setdefault("transition", DEFAULT_TRANS.get(sc["type"], "cut") if i else "cut")
         for key in ("clip", "before", "after"):
             if sc.get(key):
@@ -3326,9 +3912,26 @@ def build(sc, ctx):
 def frames(sc, ctx, k0=0, count=None, prev=None):
     n = sc["_n"]
     count = n - k0 if count is None else count
-    bg, els, _, extra = build(sc, ctx)
+    bg, els, sfx_ev, extra = build(sc, ctx)
     W, H = ctx.W, ctx.H
     reader = None
+    hits = []
+    if ctx.energy and sc.get("fx", True) is not False:
+        raw = [(0.0, True)] if sc["_t0"] > 0 else []
+        for (tt, name, g) in sfx_ev:
+            if name in ("impact", "thump", "reveal"):
+                raw.append((tt, True))
+            elif name in ("pop", "click") and ctx.energy >= 2:
+                raw.append((tt, False))
+        if ctx.energy >= 2:
+            raw += [(b, None if j % 2 == 0 else False) for j, b in enumerate(sc.get("_beats", []))]
+        rng_h = np.random.default_rng(sc["_seed"] % 2 ** 32 + 77)
+        for tt, st in sorted(raw):
+            if hits and tt - hits[-1][0] < 0.06:
+                prev_st = hits[-1][1]
+                hits[-1] = (hits[-1][0], True if (prev_st or st) else (None if None in (prev_st, st) else False), hits[-1][2])
+            else:
+                hits.append((tt, st, float(rng_h.uniform(0, 2 * math.pi))))
     if bg["kind"] == "clip":
         lk = dict(ctx.grade)
         lk.update(bg.get("look") or {})
@@ -3339,12 +3942,16 @@ def frames(sc, ctx, k0=0, count=None, prev=None):
     rng = np.random.default_rng(sc["_seed"] % 2 ** 32)
     shake = extra.get("shake")
     drift = float(sc.get("drift", ctx.drift if sc["type"] not in ("collage", "device") else 0))
+    ctx._beats_now = sc.get("_beats", []) if ctx.energy >= 2 else []
+    live_bg = ctx.energy >= 2 and bg["kind"] == "panel" and sc.get("fx", True) is not False
     try:
         for k in range(k0, k0 + count):
             t = k / ctx.fps
             pnow = ctx.panel_frame(sc["_t0"] + t) if animated else base
             bgf = reader.next() if reader else pnow
             out = pnow.copy() if (bg.get("hide") or reader is None) else bgf.copy()
+            if live_bg:
+                out = bg_energy(out, sc["_t0"] + t, t, ctx)
             for el in els:
                 el.draw(out, t, ctx, bgf)
             if shake and shake[0] <= t < shake[0] + shake[1]:
@@ -3355,9 +3962,13 @@ def frames(sc, ctx, k0=0, count=None, prev=None):
                 cw_, ch_ = W / z, H / z
                 x0_, y0_ = (W - cw_) / 2, (H - ch_) / 2
                 out = np.array(Image.fromarray(out).resize((W, H), Image.BILINEAR, box=(x0_, y0_, x0_ + cw_, y0_ + ch_)))
+            if hits:
+                out = camera_fx(out, t, hits, ctx)
+            elif ctx.premium and sc["_t0"] > 0 and t < 0.9 and sc.get("fx", True) is not False:
+                out = affine_frame(out, 1 + 0.03 * (1 - e_cubic(t / 0.9)))
             if ctx.captions:
                 draw_captions(out, sc["_t0"] + t, ctx)
-            out = transition(sc["transition"], out, prev, k, ctx.U, rng)
+            out = transition(sc["transition"], out, prev, k, ctx.U, rng, ctx)
             yield out
     finally:
         if reader:
@@ -3531,10 +4142,15 @@ def build_audio(brief, scenes, ctx, out_wav):
             return bank[name]
         gain = float(brief.get("sfx_volume", 0.55))
         for i, sc in enumerate(scenes):
-            ev = list(build(sc, ctx)[2]) if sc["type"] not in ("collage",) else [(0.4, "whoosh", 0.4)]
+            if "_sfx" in sc:  # set by the web renderer
+                ev = list(sc["_sfx"])
+            else:
+                ev = list(build(sc, ctx)[2]) if sc["type"] not in ("collage",) else [(0.4, "whoosh", 0.4)]
             tr = sc.get("transition")
             if i and tr in TRANS_SFX:
                 ev.append((0.0, TRANS_SFX[tr], 0.6))
+            if i and ctx.energy >= 2 and tr not in ("flash", "punch"):
+                ev.append((0.0, "thump", 0.25 + 0.1 * ctx.energy))
             for (tt, name, g) in ev:
                 y, lead = get(name)
                 if tt > sc["_dur"]:
@@ -4170,6 +4786,44 @@ def selftest(workers=2):
     finally:
         os.chdir(cwd)
     rep = json.load(open(os.path.join(d, "selftest_qa.json"))) if os.path.exists(os.path.join(d, "selftest_qa.json")) else {}
+    # second pass: the same scenes with fx energy 3 (beat punches, shake, crazy transitions, gallery pop-outs)
+    bfx = dict(brief, out="selftest_fx.mp4", fx={"energy": 3}, music_free_version=False)
+    bfx.pop("voiceover", None)
+    bpx = os.path.join(d, "brief_fx.json")
+    json.dump(bfx, open(bpx, "w"), ensure_ascii=False)
+    try:
+        run(bpx, os.path.join(d, "selftest_fx.mp4"), "9x16", True, workers, False, None, cleanup=True, creative=None, do_qa=True)
+    finally:
+        os.chdir(cwd)
+    qfx = os.path.join(d, "selftest_fx_qa.json")
+    rfx = json.load(open(qfx)) if os.path.exists(qfx) else {"errors": ["energy render missing"]}
+    rep.setdefault("errors", []).extend("fx pass: " + e for e in rfx.get("errors", []))
+    print("fx pass:", "ok" if os.path.exists(os.path.join(d, "selftest_fx.mp4")) and not rfx.get("errors") else "FAILED")
+    # third pass: the browser renderer ("renderer": "web") on the scene types it draws
+    web_types = ("kinetic", "contrast", "gallery", "wall", "bundle", "logo", "cta")
+    bw = dict(brief, out="selftest_web.mp4", renderer="web", music_free_version=False,
+              scenes=[dict(sc_) for sc_ in brief["scenes"] if sc_["type"] in web_types])
+    bw.pop("voiceover", None)
+    bw["scenes"][3]["items"][0]["pop"] = {"box": [0.2, 0.2, 0.8, 0.6], "scale": 1.3}
+    bpw = os.path.join(d, "brief_web.json")
+    json.dump(bw, open(bpw, "w"), ensure_ascii=False)
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import promo_web
+        prob = promo_web.browser_problem()
+    except ImportError:
+        prob = "promo_web.py is missing next to promo_engine.py"
+    if prob:
+        print("web pass: skipped -", prob)
+    else:
+        try:
+            promo_web.run_web(bpw, os.path.join(d, "selftest_web.mp4"), "9x16", True, workers, False, None, do_qa=True)
+        finally:
+            os.chdir(cwd)
+        qw = os.path.join(d, "selftest_web_qa.json")
+        rw = json.load(open(qw)) if os.path.exists(qw) else {"errors": ["web render missing"]}
+        rep.setdefault("errors", []).extend("web pass: " + e for e in rw.get("errors", []))
+        print("web pass:", "ok" if os.path.exists(os.path.join(d, "selftest_web.mp4")) and not rw.get("errors") else "FAILED")
     os.chdir(d)
     caps = build_captions(brief)
     os.chdir(cwd)
@@ -4390,6 +5044,13 @@ def main():
             wd = stem + "_work"
             if var:
                 stem += "_" + var
+            if load_brief(bp).get("renderer") == "web":
+                # the browser renderer (promo_web.py, next to this file): CSS 3D, motion blur, sharp type
+                sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+                import promo_web
+                promo_web.run_web(bp, stem + ext, fmt, a.draft, a.workers, a.preview, a.frame, wd, creative=creative,
+                                  do_qa=not a.no_qa, plan=a.plan)
+                continue
             run(bp, stem + ext, fmt, a.draft, a.workers, a.preview, a.frame, wd, cleanup=len(variants) == 1,
                 creative=creative, do_qa=not a.no_qa, plan=a.plan)
 

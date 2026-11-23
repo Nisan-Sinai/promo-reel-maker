@@ -1,11 +1,11 @@
 ---
 name: "promo-reel-maker"
-description: "Make branded, beat-synced promo videos (Reels/TikTok/Shorts/Status ads, YouTube promos) for a business from its clips, photos or website/brand repo: kinetic typography, motion graphics, device mockups, portfolio galleries and proof walls, automatic QA report. Hebrew/RTL first; 9:16 plus 1:1, 4:5, 16:9, up to 4K. Use for סרטון פרסומי, רילס לעסק, סרטון מיתוג, or 'make a video like this'."
+description: "Make branded, beat-synced promo videos (Reels/TikTok/Shorts/Status ads, YouTube promos) for a business from its clips, photos or website/brand repo: kinetic typography, motion graphics, device mockups, portfolio galleries, proof walls and 3D pop-outs, an optional Chrome renderer for cinematic motion, automatic QA report. Hebrew/RTL first; 9:16 plus 1:1, 4:5, 16:9, up to 4K. Use for סרטון פרסומי, רילס לעסק, סרטון מיתוג, or 'make a video like this'."
 ---
 
 # Promo Reel Maker
 
-Turns a business's raw clips/photos plus a few facts into a polished 20-40 s ad: kinetic gradient typography, a hook with footage playing *inside* the letters, red "problem" stamps that slam in, a logo reveal with a light sweep, service cards, a photo collage, counting stats, an animated checklist with the clip in a card, testimonial card with stars, before/after wipe, offer badge, and a CTA with a chat button, phone number and a tap animation. Cuts snap to the music's beat; whooshes/impacts/pops are placed automatically; audio is loudness-normalized; a cover image is exported. Everything is driven by one JSON brief and rendered by the bundled engine (Python + Pillow + numpy + ffmpeg, no browser). Unchanged scenes are cached, so edits and A/B hook variants re-render only what changed.
+Turns a business's raw clips/photos plus a few facts into a polished 20-40 s ad: kinetic gradient typography, a hook with footage playing *inside* the letters, red "problem" stamps that slam in, a logo reveal with a light sweep, service cards, a photo collage, counting stats, an animated checklist with the clip in a card, testimonial card with stars, before/after wipe, offer badge, and a CTA with a chat button, phone number and a tap animation. Cuts snap to the music's beat; whooshes/impacts/pops are placed automatically; audio is loudness-normalized; a cover image is exported. Everything is driven by one JSON brief and rendered by the bundled engine (Python + Pillow + numpy + ffmpeg), or - for the motion-graphics scenes - by an optional browser renderer that draws every frame in Chrome. Unchanged scenes are cached, so edits and A/B hook variants re-render only what changed.
 
 Version 2 adds what the strongest short-form ads do: photos get real camera moves (wide shots pan across instead of being cropped), footage stays bright with soft scrims and boxed caption-style text instead of a dimmed frame, a `showcase` scene for one-feature-per-shot tours, `features` (icon rows on glass), `location` (map-pin drop), a boxed hook, slide / light-leak / blur transitions, colour grades, Reels safe zones and scene lengths set in beats.
 
@@ -13,26 +13,32 @@ Version 3 adds brand and tech motion graphics that need no footage (Formula C): 
 
 Version 3.1 adds the neon course/agency ad (Formula D): `contrast` (✕ what they use today, ✓ the answer, a chat bar that types a request, a caption that switches when the ✓ lands), `gallery` (a fast portfolio reel of real screenshots or clips inside a 3D phone or laptop, with a 01/07 counter and labels), `wall` (all the work on a tilted 3D wall, with quote cards for real testimonials), `bundle` (1-3 offer cards joined by "+"), a `neon` colour preset, a typing sound, and a solid pill CTA button (`button_style`, `button_icon`). v3.0 briefs render pixel-identical.
 
+Version 3.2 adds motion styles (`fx`). `premium`: smooth, cinematic motion - elements ease in with a soft blur, cards turn gently in 3D with a light sheen, the camera settles slowly, and scenes change with push, zoom-through and cube transitions. `hype` (energy 1-3): zoom punches on the beat, camera shake, colour split and glitch on hits, a live background and fast 3D transitions (`cube`, `spin`, `zoom_blur`, `slices`, `shape`, `diamond`). Both add pop-outs to `gallery`: a block of a screenshot (a product card, a dashboard, a chat bubble) lifts out of the phone or laptop screen toward the viewer, with its real rounded corners. Without `fx`, every older brief renders pixel-identical.
+
+Version 4 adds a second renderer, `"renderer": "web"`. The same engine plans the video, snaps it to the beat, mixes the sound, makes the cover and runs QA, but every frame of the motion-graphics scenes (kinetic, title, contrast, gallery, wall, bundle, counter/stat, logo, cta) is drawn by Chrome: real CSS 3D (phones and laptops that turn, cards that lift off the screen), sub-pixel motion with motion blur, sharp type and soft shadows. It is clearly more polished than the classic renderer and is the recommended choice for Formula D. It needs Playwright and a Chrome or Chromium browser in the workspace; when they are missing, or a brief uses a scene type it does not draw yet, the video renders with the classic renderer in the premium style automatically. The classic renderer and every older brief are unchanged.
+
 ## 0. Setup (once per session)
 
-1. Extract the engine from this SKILL.md (no retyping). The skill's base directory is given when the skill loads; if not, find it with `find / -name SKILL.md -path "*promo-reel-maker*" 2>/dev/null | head -1`.
+1. Extract the engine and the web renderer from this SKILL.md (no retyping). The skill's base directory is given when the skill loads; if not, find it with `find / -name SKILL.md -path "*promo-reel-maker*" 2>/dev/null | head -1`.
 ```bash
 python3 - "<skill base dir>/SKILL.md" <<'EOF'
 import sys, os
 s = open(sys.argv[1], encoding="utf-8").read()
-code = s.rsplit("<!-- ENGINE:" + "BEGIN -->", 1)[1].rsplit("<!-- ENGINE:" + "END -->", 1)[0]
-code = code.split("```python\n", 1)[1].rsplit("```", 1)[0]
-p = os.path.expanduser("~/.cache/promo-reel/promo_engine.py")
-os.makedirs(os.path.dirname(p), exist_ok=True)
-open(p, "w", encoding="utf-8").write(code)
-print(p)
+for tag, name in (("ENGINE", "promo_engine.py"), ("WEB", "promo_web.py")):
+    code = s.rsplit("<!-- " + tag + ":" + "BEGIN -->", 1)[1].rsplit("<!-- " + tag + ":" + "END -->", 1)[0]
+    code = code.split("```python\n", 1)[1].rsplit("```", 1)[0]
+    p = os.path.expanduser("~/.cache/promo-reel/" + name)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    open(p, "w", encoding="utf-8").write(code)
+    print(p)
 EOF
-python3 -m py_compile ~/.cache/promo-reel/promo_engine.py && echo engine-ok
+python3 -m py_compile ~/.cache/promo-reel/promo_engine.py ~/.cache/promo-reel/promo_web.py && echo engine-ok
 ```
-   Only if SKILL.md is not readable on disk, write the code block in the Engine section verbatim to that path. If py_compile reports an error, fix that line.
+   Only if SKILL.md is not readable on disk, write the code blocks in the Engine and Web renderer sections verbatim to those paths (promo_web.py must sit next to promo_engine.py). If py_compile reports an error, fix that line.
 2. Check tools: `ffmpeg -version`, `python3 -c "import numpy, PIL; from PIL import features; print(features.check('raqm'))"`. If raqm is False: `pip install python-bidi --break-system-packages` (needed for correct Hebrew order). scipy is optional (only for synthesized fallback SFX); `qrcode` only if a QR is wanted.
 3. Fonts (Rubik, Heebo, Secular One, Frank Ruhl, Assistant, Rubik Dirt, Suez One, Karantina, Fredoka, Varela Round, Noto Sans Hebrew, Geist, Geist Mono) download automatically from Google Fonts on GitHub into ~/.cache/promo_fonts; if blocked, the engine falls back to local Hebrew fonts.
-4. Optional but quick (about 10 s): `python3 $E --selftest` renders every scene type from synthetic media at draft size and runs QA. It must print `SELFTEST PASS` (the short test CTA is expected to miss the 4 s rule). Run it after any change to the engine.
+4. Web renderer (needed only for `"renderer": "web"`): `python3 -c "import playwright" 2>/dev/null || pip install playwright --break-system-packages`, then `python3 ~/.cache/promo-reel/promo_web.py --check`. It uses a system Chrome (`/usr/bin/google-chrome`, Chromium, or the path in the `CHROME` environment variable). If it reports that no browser could start, try `python3 -m playwright install chromium` once; if the download is blocked, carry on - briefs with `"renderer": "web"` then render with the classic renderer in the premium style, and tell the user the video used the fallback.
+5. Optional (about 1-2 minutes): `python3 $E --selftest` renders every scene type from synthetic media at draft size three times - as is, with `fx` energy 3 (every transition, camera hits, pop-outs), and with the web renderer (skipped, with the reason, when Chrome is not available) - and runs QA on each. It must print `fx pass: ok`, `web pass: ok` (or `skipped`) and `SELFTEST PASS` (the short test CTA is expected to miss the 4 s rule). Run it after any change to the engine.
 
 Below, `E=~/.cache/promo-reel/promo_engine.py`.
 
@@ -113,7 +119,7 @@ Kinetic lines are design lines: each one stays on one line and shrinks to fit (s
 
 ### Formula D - neon course / agency ad: portfolio, proof and offer (courses, studios, freelancers, agencies)
 
-Built from the user's REAL work: screenshots of their own sites or apps, clips of their products, real messages from clients. Theme: the brand kit's colours, or `{"preset": "neon", "type": "tech", "bg_style": "tech"}` (dark violet with orange/purple neon) when the brand has none.
+Built from the user's REAL work: screenshots of their own sites or apps, clips of their products, real messages from clients. Theme: the brand kit's colours, or `{"preset": "neon", "type": "tech", "bg_style": "tech"}` (dark violet with orange/purple neon) when the brand has none. Render it with `"renderer": "web"` (section 2c) whenever the web check passes; otherwise add `"fx": {"style": "premium"}` to the classic renderer.
 
 | # | scene | purpose | example copy (Nisan Sinai Technologies) | length |
 |---|---|---|---|---|
@@ -126,7 +132,7 @@ Built from the user's REAL work: screenshots of their own sites or apps, clips o
 | 7 | cta | logo, one action; `button_style: primary` + `button_icon: false` gives a solid pill like a course ad | "בואו נבנה משהו מעולה" | ≥ 4 s |
 
 Real assets only: gallery and wall items are the user's own work - label demo or concept projects as such in the tag (the demo used "Shel-Yah · פרויקט הדגמה", the site's own wording); a counter shows a real number; quote cards come only from messages the user sends (screenshots or exact text) and is allowed to publish - never invent or "illustrate" a testimonial. If there are no real quotes, the wall shows the work itself. Never copy the reference ad's brand, screenshots, testimonials or copy.
-Screenshots: when a browser is available, open the user's own sites, decline cookie banners (the privacy-preserving choice), scroll to the hero and to two or three key sections and take screenshots; close the tabs you opened. Remove the mouse cursor and browser-extension icons from each screenshot (`cv2.inpaint` on a small mask, or crop). Use desktop screenshots in the laptop (`device: laptop`; the label becomes a large headline under it) and tall mobile screenshots in the phone (they scroll automatically). `focus` [x, y] in an item's `src` aims the crop. On the wall set `tile_ratio` to the screenshots' height/width (0.45 for desktop screenshots, 1.9-2.2 for mobile) and `tile_w` 0.5 for wide tiles.
+Screenshots: when a browser is available, open the user's own sites, decline cookie banners (the privacy-preserving choice), scroll to the hero and to two or three key sections and take screenshots; close the tabs you opened. Remove the mouse cursor and browser-extension icons from each screenshot (`cv2.inpaint` on a small mask, or crop). Use desktop screenshots in the laptop (`device: laptop`; the label becomes a large headline under it) and tall mobile screenshots in the phone (they scroll automatically). `focus` [x, y] in an item's `src` aims the crop. Phone screenshots: if the browser window cannot be made phone-sized, load the site inside a same-origin iframe 430 px wide (scaled up for sharpness) and capture it in parts, stitched top to bottom. Pop-outs look best when the box is the real element: read its `getBoundingClientRect()` and computed `border-radius` in the browser and divide by the page width/height, so the lifted piece has exactly the card's edges and corners. On the wall set `tile_ratio` to the screenshots' height/width (0.45 for desktop screenshots, 1.9-2.2 for mobile) and `tile_w` 0.5 for wide tiles.
 
 Copy rules: Hebrew unless asked otherwise; one idea per scene; big lines short (about 12 characters looks best - longer lines auto-shrink); small lines up to about 25 characters; digits for numbers; total 15-30 s for Formulas A, C and D, 25-40 s for Formula B; CTA at least 4 s. Multi-line text is balanced automatically (no single word left on the last line).
 Honesty: never invent numbers, testimonials, client names, certifications or prices. If something is missing, drop that scene, or use an obviously marked placeholder and tell the user it must be replaced before publishing. The CTA button draws a generic chat icon (no third-party logos); naming WhatsApp in the button text is fine.
@@ -148,6 +154,27 @@ Set `"platform"` and the engine picks the format, the safe band and the length c
 | youtube / promo (brand film, explainer) | 16x9 | 6%-94% | 30-120 s |
 
 Resolution: 1080 wide by default (1080x1920 for 9:16, 1920x1080 for 16:9). `"scale": 2` renders 4K (2160x3840 / 3840x2160) with vector-sharp text; it takes about 4 times as long, so render 4K only when it is asked for, after the 1080 version is approved.
+
+### 2c. Motion style and renderer
+
+Two independent choices, both optional:
+
+| setting | what it does | when |
+|---|---|---|
+| no `fx` (default) | the calm v3.1 motion, pixel-identical to older versions | existing briefs, photo-led ads |
+| `"fx": {"style": "premium"}` | smooth, cinematic motion: soft-blur entrances, gentle 3D card turns with a sheen, a slow camera settle, push / zoom-through / cube transitions chosen by the next scene, gallery pop-outs with real corners | brand, tech and portfolio ads; the classic fallback of the web renderer |
+| `"fx": {"energy": 1-3}` (or "low" / "high" / "crazy") | hype: punches and shake on hits, live background, fast 3D transitions rotated automatically, every gallery item pops out | loud, short pieces with strong music; energy 2 for Reels, 3 only for very short loud clips |
+| `"renderer": "web"` | every frame of the motion-graphics scenes drawn by Chrome with real 3D, motion blur and sharp type; the premium style is implied | Formula D and any video built only from the scene types listed below |
+
+Hype levels: 1 - a zoom punch, camera shake and a brief colour split on every cut and impact sound; 2 - level 1 stronger, a punch on every beat, glitch bands on hits, light streaks and a ring burst on brand backgrounds, elements that slam in with a motion trail and keep bouncing to the beat, transitions rotated through cube, zoom_blur, slices, spin, shape, whip, diamond and glitch, a thump under each cut; 3 - level 2 at full strength with a white flash on hits. A calm scene can opt out with `"fx": false`. Feedback from real use: viewers read hype as amateurish when it runs for a whole ad - prefer premium (or the web renderer) for brands, and use hype only when the user asks for it.
+
+Web renderer details:
+- Draws: kinetic, title, contrast, gallery (phone or laptop, with pop-outs), wall, bundle, counter / stat / stats, logo, cta. Any other scene type, or voiceover captions, sends the whole brief to the classic renderer (premium style) with a log line saying why - mixing renderers inside one video is not supported.
+- Transitions: push, push_up, zoom_through, cube, shape, diamond, fade, blur, flash, cut; the classic names map onto them (zoom, punch, spin, glitch → zoom_through; whip, slide → push; slide_up, slices → push_up; leak → fade).
+- Top-level fields: `motion_blur` (samples per frame, 4; 1 with `--draft`; only moving frames take extra samples), `shutter` (0.5 of a frame).
+- Same commands as the classic renderer (`--plan`, `--preview`, `--frame`, `--draft`, `--qa`), same QA, cover and music-free version. Pop-outs are kept inside the frame automatically (a too-large `scale` is reduced). It has no scene cache: every full render redraws every frame, so look at `--frame` stills first.
+- Speed: about 5-6 minutes for 30 s of 1080x1920 on 2 cores (about 0.2 s per capture); `--draft` (half size, no motion blur) about 1 minute. Run it in the foreground with a long timeout.
+- `python3 ~/.cache/promo-reel/promo_web.py --check` says whether Chrome can start here.
 
 ## 3. Prepare footage
 
@@ -218,7 +245,7 @@ Write `brief.json` (reference below; starters: `python3 $E --new property|servic
 - `python3 $E brief.json --plan` - storyboard + layout check, no render (section 1b).
 - `python3 $E brief.json --preview --draft` - contact sheet of every scene (2 frames each) at half size, a few seconds. Look at it.
 - `python3 $E brief.json --frame 1.2,9,15,21,31` - full-size PNGs at those seconds; look at the busiest moments (hook, cards, device, CTA) before the full render. Check: Hebrew reads in order, no single word alone on a line, nothing touches the frame edge, text is outside the platform's UI zones.
-- `python3 $E brief.json` - final MP4 + `<out>_cover.jpg`, then automatic QA. About 1 minute per 30 s of 1080x1920 on 2 cores; run it in the foreground with a long timeout. The plan printed first shows each scene's start, length, transition and clip.
+- `python3 $E brief.json` - final MP4 + `<out>_cover.jpg`, then automatic QA. About 1 minute per 30 s of 1080x1920 on 2 cores with the classic renderer (about 2.5 minutes with hype energy 2, 5-6 minutes with the web renderer); run it in the foreground with a long timeout. The plan printed first shows each scene's start, length, transition and clip.
 - Edits: change the brief and run again - only scenes whose content changed re-render (cache in `<out>_work/`, keyed by scene content, clip file contents, theme and engine version). A scene's cache also depends on the scene before it (transitions blend from its last frame). `--draft` writes separate `_draft` files. After editing the engine itself, delete `<out>_work/` so no stale scene is reused.
 
 Automatic QA (written after every render unless `--no-qa` or `"qa": false`; run it alone with `python3 $E brief.json --qa out.mp4`): `<out>_qa.md`, `<out>_qa.json` and `<out>_qa_sheet.jpg` (1 frame per second).
@@ -254,7 +281,7 @@ Send the MP4 and a preview image (8 key frames from the final file, or the cover
 ## 8. Maintenance and versioning
 
 - The engine prints its version (`--help` header; `VERSION` in the code) and every render appends one line to `~/.cache/promo-reel/runs.jsonl` (brief, output, scenes, duration, render time, QA score, errors, warnings). `python3 $E --history` shows the last renders - use it to spot recurring problems across jobs.
-- Lessons from a job go into that log or the conversation, not straight into this file. Change the skill only through a reviewed update: back up the current SKILL.md, change the engine and docs, run `--selftest` and a real render of an old brief (backward compatibility), then propose the update for the user to save. Never delete a working scene type, field or option; add new behaviour behind new fields or defaults that leave older briefs unchanged. Random choices (background drift, particles) are seeded from the scene content with a frozen salt (`SEED_SALT`), not from `VERSION`, so the same brief looks the same after an engine upgrade - check this by rendering `--frame` stills of an old brief with the previous and the new engine and comparing pixels (expect a difference of 0).
+- Lessons from a job go into that log or the conversation, not straight into this file. Change the skill only through a reviewed update: back up the current SKILL.md, change the engine and docs, run `--selftest` and a real render of an old brief (backward compatibility), then propose the update for the user to save. Never delete a working scene type, field or option; add new behaviour behind new fields or defaults that leave older briefs unchanged. Random choices (background drift, particles) are seeded from the scene content with a frozen salt (`SEED_SALT`), not from `VERSION`, so the same brief looks the same after an engine upgrade - check this by rendering `--frame` stills of an old brief with the previous and the new engine and comparing pixels (expect a difference of 0). The web renderer has its own version (`WEB_VERSION` in promo_web.py, printed in the plan line) and is covered by the self-test's web pass.
 
 ## Brief reference
 
@@ -355,6 +382,8 @@ Top-level fields:
 - `music`: `file, start, volume (0.8), beat_sync (true)`. `voiceover`: `file, at, volume, text, captions (true), words_per_caption, caption_chars, caption_size, caption_y` - music ducks under it; `text` turns on captions (section 4).
 - `sfx`: true | false | {name: path or {file, sync, max, gain}}; `sfx_volume` (0.55).
 - `variants`: [{name, scenes: {"<index in scenes>": {overrides}}}] - extra outputs `<out>_<name>.mp4` sharing the cache.
+- `renderer`: classic (default) | web - which renderer draws the frames (section 2c); `motion_blur` (4), `shutter` (0.5) for the web renderer.
+- `fx`: {"style": "premium"} | {"energy": 0-3} | "premium" | "low" | "high" | "crazy" - motion style (section 2c); a scene can set `"fx": false` to stay calm.
 - `qa` (true): run QA after rendering; `cover_scene` (0): which scene the cover image is taken from; `music_free_version` (false): also write `<out>_no_music.mp4`.
 
 Clip spec: `"path"` or `{src, start, speed, fit: auto|cover|blur, focus: [x, y], move, amount, pan_speed, look: {bw, dim, blur, grade, vignette, bright, contrast, sat, warm}}`. Photo `move`: auto (default) | push | pull | pan_left | pan_right | pan_up | pan_down | drift | still; `amount` = push/pull zoom (0.13); `pan_speed` = frame widths per second (0.2).
@@ -384,11 +413,11 @@ Every scene accepts: `dur` or `beats` (length in music beats; needs music), `tra
 | text | lines [str or {text, style small\|body\|big\|accent, anim, size}], clip | 2.0 | punch |
 | cta | eyebrow, eyebrow_size (46), headline, headline_size (92), button (text or false), button_style cta\|primary (cta = the theme's cta colour), button_icon (true = chat icon; false = centered text pill), phone, website, qr (url), logo (true), tap_at, clip | 5.0 | zoom |
 | contrast | items [{text, mark x\|check, size (76 ✕ / 90 ✓)}], per (0.55), start (0.15), prompt (chat bar that types it), prompt_at, cps (14 characters/s), caption (shown until the ✓), caption2 (from the ✓; alone it appears with the ✓), highlight (words), caption_size (46), clip | start + per × items + 1.4, longer with a prompt | blur |
-| gallery | items [{src (image or clip spec), label, tag, icon, highlight}], per (0.7), kicker, device phone\|laptop, device_scale (1), swing (9), label_style pill\|headline (headline: laptop in portrait), label_size (72), clip | 0.45 + per × items + 0.6 | zoom |
+| gallery | items [{src (image or clip spec), label, tag, icon, highlight}], per (0.7), kicker, device phone\|laptop, device_scale (1), swing (9), label_style pill\|headline (headline: laptop in portrait), label_size (72), pop true\|alternate\|false (item `pop`: true\|false\|{box [x0, y0, x1, y1] as fractions of the screenshot, radius (fraction of its width), scale (1.35 premium / 1.8 hype), at}), clip | 0.45 + per × items + 0.6 | zoom |
 | wall | images, cols (6), rows (5), tile_w (0.27 of width), tile_ratio (tile height/width, 1.9), wall_dim (0.6), wall_ry (-14), wall_rx (32), title, title_size (96), title_highlight (default: numbers), sub, quotes [{text, highlight, who, label, size}], quote_label, quotes_at (0.9), per_quote (1.9) | max(3, quotes_at + per_quote × quotes + 0.6) | blur |
 | bundle | items [{title, text, image, tags [text or {text, icon}], size (66)}] (up to 3), title, title_size (90), clip | 0.2 + 0.55 × items + 2.2 | slide_up |
 
-Transitions: cut, flash, punch, fade, zoom, whip, slide, slide_up, glitch, blur, leak (warm light leak). Text animations: up, down, fade, pop, zoom, slam, wipe, left, right, none.
+Transitions: cut, flash, punch, fade, zoom, whip, slide, slide_up, glitch, blur, leak (warm light leak), push (the next scene pushes the last one out), zoom_through (the camera flies through the last scene into the next), cube (3D cube turn), spin (rotating whip with motion blur), zoom_blur (radial zoom through a flash), slices (strips sliding in from alternate sides), shape (circle opening with a ring in the theme colour), diamond (the same with a diamond). Text animations: up, down, fade, pop, zoom, slam, wipe, left, right, none.
 Icons (label, place, features, cards): pin, people, bed, view, waves, pool, star, sparkle, check, home, snow (air conditioning), wifi, parking, sun, heart, calendar, chat, phone, key, book, kitchen, coffee, clock, web, cart, layers, bolt, gear, code, chip, chart, rocket, search, lock. An unknown icon falls back to check (with a warning).
 Outputs: `<out>.mp4`, `<out>_cover.jpg`, `<out>_qa.md/.json`, `<out>_qa_sheet.jpg`, `<out>_storyboard.md` (`--plan`), `<out>_preview.jpg`, `<out>_frame_<t>.png`, `<out>_work/` (cache + plan.json with final timings).
 
@@ -411,6 +440,10 @@ Command line: `python3 $E [brief.json] [--out FILE] [--format F] [--draft] [--pr
 - A gallery screenshot is cut badly: aim it with `focus` in the item's `src` spec, or use the phone for tall screenshots and the laptop for wide ones.
 - The wall shows its edges or tiles look stretched: set `tile_ratio` to the screenshots' real height/width and add `rows`; the wall is scaled to cover the frame.
 - The typing bar finishes too late: raise `cps` or shorten the `prompt` (the scene grows to fit it).
+- `[web] ... rendering with the classic renderer`: the web renderer could not run (Playwright or Chrome missing, or an unsupported scene type) - the line says which; fix it (setup step 4) or accept the premium-style classic render and tell the user.
+- A pop-out lifts the wrong part of a screenshot: set the item's `pop` to {"box": [x0, y0, x1, y1], "radius": r} from the real element (Formula D), or `false`.
+- Hype motion feels too busy or cheap: switch to `"fx": {"style": "premium"}` or the web renderer; or lower the energy and set `"fx": false` on calm scenes.
+- Web renderer text wraps oddly around a hyphen: hyphens between words are made non-breaking automatically; for other breaks, split the line in the brief.
 - A logo shows a square box behind it: it is opaque with a non-uniform background; supply a transparent PNG (`logo_bg: keep` turns off the automatic corner removal).
 
 ## Engine
@@ -429,7 +462,7 @@ from concurrent.futures import ProcessPoolExecutor
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, features
 
-VERSION = "3.1.0"
+VERSION = "4.0.0"
 SEED_SALT = "3.0.0"  # frozen: keeps random choices stable across engine versions
 FFMPEG = shutil.which("ffmpeg") or "ffmpeg"
 SR = 48000
@@ -699,6 +732,25 @@ class Ctx:
         self.brand = brief.get("brand", {})
         self._panel = None
         self._logo = None
+        # motion style: "premium" (smooth, cinematic) or "hype" (beat hits, shake, glitch; energy 1-3)
+        fx = brief.get("fx", 0)
+        style, energy = None, 0
+        if isinstance(fx, dict):
+            style, energy = fx.get("style"), fx.get("energy", 0)
+        elif isinstance(fx, str):
+            v = fx.lower().strip()
+            if v in ("premium", "pro", "cinematic", "smooth"):
+                style = "premium"
+            else:
+                energy = {"off": 0, "none": 0, "low": 1, "medium": 2, "high": 2, "hype": 2, "crazy": 3, "max": 3}.get(v, 0)
+        else:
+            energy = fx or 0
+        if style is None and energy:
+            style = "hype"
+        if style == "hype" and not energy:
+            energy = 2
+        self.premium = style == "premium"
+        self.energy = int(max(0, min(3, float(energy or 0)))) if style == "hype" else 0
 
     def font(self, role, size):
         return get_font(self.ts[role], size * self.U)
@@ -1160,13 +1212,157 @@ def e_inout(p):
     return 4 * p ** 3 if p < 0.5 else 1 - (-2 * p + 2) ** 3 / 2
 
 
+def beat_env(ctx, t):
+    """1 on a beat of the current scene, decaying over about 0.15 s (0 without fx energy or music)."""
+    bs = getattr(ctx, "_beats_now", None)
+    if not bs:
+        return 0.0
+    last = None
+    for b in bs:
+        if b <= t:
+            last = b
+        else:
+            break
+    return math.exp(-(t - last) / 0.13) if last is not None else 0.0
+
+
 class Sprite:
     def __init__(self, img, cx, cy, t0=0.0, anim="up", d=0.35, rtl=True, pulse=0.0, scale_fn=None):
         self.img, self.cx, self.cy, self.t0, self.anim, self.d = img, cx, cy, t0, anim, d
         self.arr = np.asarray(img)
         self.rtl, self.pulse, self.scale_fn = rtl, pulse, scale_fn
 
+    def _pose(self, t, ctx):
+        """Energy-mode pose (fx energy >= 2): bigger, overshooting entrances, then the element keeps floating
+        and bounces on the beat. Returns (alpha, dx, dy, scale, progress) or None before the entrance."""
+        if t < self.t0:
+            return None
+        p = clamp((t - self.t0) / self.d)
+        U, k = ctx.U, self.anim
+        a, dx, dy, s = 1.0, 0.0, 0.0, 1.0
+        if k in ("up", "down"):
+            e = e_back(p, 2.0)
+            a, dy = clamp(p * 2.5), (1 - e) * 170 * U * (1 if k == "up" else -1)
+        elif k in ("left", "right"):
+            e = e_back(p, 2.0)
+            a, dx = clamp(p * 2.5), (1 - e) * 220 * U * (-1 if k == "left" else 1)
+        elif k in ("pop", "fade"):
+            a, s = clamp(p * 3), 0.25 + 0.75 * e_back(p, 2.6)
+        elif k == "zoom":
+            a, s = clamp(p * 2.5), 1.9 - 0.9 * e_back(p, 1.8)
+        elif k == "slam":
+            a, s = clamp(p * 4), 3.0 - 2.0 * (p * p)
+        if p >= 1:
+            ph = self.cx * 0.013 + self.cy * 0.007
+            dy += math.sin(t * 2.4 + ph) * 5 * U
+            s *= 1 + 0.008 * math.sin(t * 1.7 + ph)
+        s *= 1 + 0.035 * (ctx.energy / 2.0) * beat_env(ctx, t)
+        if self.pulse and p >= 1:
+            s *= 1 + self.pulse * math.sin((t - self.t0 - self.d) * 6.0)
+        if self.scale_fn:
+            s *= self.scale_fn(t)
+        ry = rx = 0.0
+        if self.arr.shape[0] * self.arr.shape[1] >= 0.03 * ctx.W * ctx.H:
+            # big elements (cards, large tags, buttons) flip in and keep swaying in 3D
+            ph = self.cx * 0.011 + self.cy * 0.005
+            if k != "slam" and p < 1:
+                ry = (1 - e_back(p, 1.6)) * 70 * (1 if self.cx <= ctx.W / 2 else -1)
+            ry += 5 * math.sin(t * 1.4 + ph)
+            rx = 2.5 * math.sin(t * 1.1 + ph * 1.3)
+        return a, dx, dy, s, p, ry, rx
+
+    def _blit(self, out, s, dx, dy, a, ry=0.0, rx=0.0):
+        arr, img = self.arr, self.img
+        h, w = arr.shape[:2]
+        if abs(s - 1) > 0.004:
+            nw, nh = max(1, int(w * s)), max(1, int(h * s))
+            img = self.img.resize((nw, nh), Image.BILINEAR)
+            arr = np.asarray(img)
+            h, w = nh, nw
+        if abs(ry) > 0.05 or abs(rx) > 0.05:
+            img = tilt(img.convert("RGBA") if img.mode != "RGBA" else img, ry, rx)
+            arr = np.asarray(img)
+            h, w = arr.shape[:2]
+        over(out, arr, self.cx - w / 2 + dx, self.cy - h / 2 + dy, a)
+
+    def _pose_premium(self, t, ctx):
+        """Premium pose: slower, smooth expo ease, small travel; big elements tilt in once in 3D, then hold."""
+        if t < self.t0:
+            return None
+        d = max(self.d, 0.55)
+        p = clamp((t - self.t0) / d)
+        e = e_expo(p)
+        U, k = ctx.U, self.anim
+        a, dx, dy, s = clamp(p * 2.2), 0.0, 0.0, 1.0
+        if k in ("up", "down"):
+            dy = (1 - e) * 60 * U * (1 if k == "up" else -1)
+        elif k in ("left", "right"):
+            dx = (1 - e) * 80 * U * (-1 if k == "left" else 1)
+        elif k in ("pop", "fade"):
+            s = 0.92 + 0.08 * e
+        elif k == "zoom":
+            s = 1.1 - 0.1 * e
+        elif k == "slam":
+            a, s = clamp(p * 3), 1.25 - 0.25 * e
+        if self.pulse and p >= 1:
+            s *= 1 + self.pulse * math.sin((t - self.t0 - d) * 6.0)
+        if self.scale_fn:
+            s *= self.scale_fn(t)
+        ry = rx = 0.0
+        if self.arr.shape[0] * self.arr.shape[1] >= 0.03 * ctx.W * ctx.H and k != "slam":
+            ry, rx = (1 - e) * 22 * (1 if self.cx <= ctx.W / 2 else -1), (1 - e) * 8
+        return a, dx, dy, s, p, ry, rx, d
+
+    def _sheen(self, out, t, ctx, d):
+        """One soft light sweep across a big element after it lands."""
+        q = (t - self.t0 - d - 0.1) / 0.75
+        if not 0 < q < 1:
+            return
+        h, w = self.arr.shape[:2]
+        if getattr(self, "_u", None) is None:
+            yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+            self._u = (xx + (h - yy) * 0.5) / (w + h * 0.5)
+        c = -0.2 + 1.4 * e_inout(q)
+        band = np.exp(-((self._u - c) / 0.07) ** 2) * (self.arr[..., 3].astype(np.float32) / 255.0) * 0.32
+        sh = np.zeros((h, w, 4), np.uint8)
+        sh[..., :3] = 255
+        sh[..., 3] = (band * 255).astype(np.uint8)
+        over(out, sh, self.cx - w / 2, self.cy - h / 2)
+
     def draw(self, out, t, ctx, bgf=None):
+        if getattr(ctx, "premium", False) and self.anim not in ("none", "wipe"):
+            pose = self._pose_premium(t, ctx)
+            if pose is None:
+                return
+            a, dx, dy, s, p, ry, rx, d = pose
+            if p < 1:
+                prev = self._pose_premium(t - 1.0 / ctx.fps, ctx)
+                if prev is not None:
+                    vx, vy = abs(dx - prev[1]), abs(dy - prev[2])
+                    if max(vx, vy) >= 2:
+                        img = self.img
+                        if abs(s - 1) > 0.004:
+                            img = img.resize((max(1, int(img.width * s)), max(1, int(img.height * s))), Image.BILINEAR)
+                        if abs(ry) > 0.05 or abs(rx) > 0.05:
+                            img = tilt(img, ry, rx)
+                        arr = hblur(np.asarray(img), int(max(vx, vy) * 1.5), 0 if vy >= vx else 1)
+                        over(out, arr, self.cx - arr.shape[1] / 2 + dx, self.cy - arr.shape[0] / 2 + dy, a)
+                        return
+            self._blit(out, s, dx, dy, a, ry, rx)
+            if p >= 1 and self.arr.shape[0] * self.arr.shape[1] >= 0.03 * ctx.W * ctx.H and abs(s - 1) <= 0.004:
+                self._sheen(out, t, ctx, d)
+            return
+        if getattr(ctx, "energy", 0) >= 2 and self.anim not in ("none", "wipe"):
+            pose = self._pose(t, ctx)
+            if pose is None:
+                return
+            if pose[4] < 1:
+                for j, ga in ((3, 0.12), (2, 0.22), (1, 0.38)):
+                    g = self._pose(t - 0.03 * j, ctx)
+                    if g is not None:
+                        self._blit(out, g[3], g[1], g[2], g[0] * ga, g[5], g[6])
+            self._blit(out, pose[3], pose[1], pose[2], pose[0], pose[5], pose[6])
+            return
         if t < self.t0 and self.anim != "none":
             return
         p = clamp((t - self.t0) / self.d) if self.anim != "none" else 1.0
@@ -2430,6 +2626,90 @@ def tilt(img, ry=0.0, rx=0.0, dist=2.4):
     return img.transform((bw, bh), Image.PERSPECTIVE, co, Image.BICUBIC)
 
 
+def tilt_mapper(w, h, ry=0.0, rx=0.0, dist=2.4):
+    """Point mapping that matches tilt(): (x, y) in the flat w x h image -> position in the tilted image."""
+    if abs(ry) < 0.05 and abs(rx) < 0.05:
+        return lambda x, y: (x, y)
+    d = dist * max(w, h)
+    ay, ax = math.radians(ry), math.radians(rx)
+
+    def raw(x, y):
+        x1, z1 = x * math.cos(ay), x * math.sin(ay)
+        y1, z2 = y * math.cos(ax) - z1 * math.sin(ax), y * math.sin(ax) + z1 * math.cos(ax)
+        f = d / (d + z2)
+        return x1 * f, y1 * f
+    pts = [raw(x, y) for (x, y) in ((-w / 2, -h / 2), (w / 2, -h / 2), (w / 2, h / 2), (-w / 2, h / 2))]
+    mx, my = min(q[0] for q in pts), min(q[1] for q in pts)
+
+    def f_(x, y):
+        X, Y = raw(x - w / 2, y - h / 2)
+        return X - mx, Y - my
+    return f_
+
+
+def card_quad(cx, cy, w, h, ry=0.0, rx=0.0, dist=2.4):
+    """Corners (TL, TR, BR, BL) of a w x h card centred at (cx, cy), rotated in 3D like tilt()."""
+    d = dist * max(w, h)
+    ay, ax = math.radians(ry), math.radians(rx)
+    out = []
+    for (x, y) in ((-w / 2, -h / 2), (w / 2, -h / 2), (w / 2, h / 2), (-w / 2, h / 2)):
+        x1, z1 = x * math.cos(ay), x * math.sin(ay)
+        y1, z2 = y * math.cos(ax) - z1 * math.sin(ax), y * math.sin(ax) + z1 * math.cos(ax)
+        f = d / (d + z2)
+        out.append((cx + x1 * f, cy + y1 * f))
+    return out
+
+
+def pop_box(fr):
+    """The most detailed block of a screenshot (headline, card, form) for the pop-out effect: (x0, y0, x1, y1)."""
+    h, w = fr.shape[:2]
+    gw = 96
+    gh = max(8, int(gw * h / w))
+    g_ = np.asarray(Image.fromarray(fr).convert("L").resize((gw, gh), Image.BILINEAR), np.float32)
+    g = np.abs(np.diff(g_, axis=0))[:, :-1] + np.abs(np.diff(g_, axis=1))[:-1]
+    sh_, sw_ = g.shape
+    I = np.pad(g.cumsum(0).cumsum(1), ((1, 0), (1, 0)))
+    best, bb = -1.0, (int(w * 0.25), int(h * 0.3), int(w * 0.75), int(h * 0.6))
+    for fw in (0.42, 0.52, 0.62):
+        bw = max(4, int(sw_ * fw))
+        for ar in (0.4, 0.6, 0.85):
+            bh = min(int(sh_ * 0.6), max(4, int(bw * ar)))
+            for y0 in range(1, sh_ - bh, 2):
+                for x0 in range(1, sw_ - bw, 2):
+                    tot = I[y0 + bh, x0 + bw] - I[y0, x0 + bw] - I[y0 + bh, x0] + I[y0, x0]
+                    cxn = (x0 + bw / 2) / sw_ - 0.5
+                    cyn = (y0 + bh / 2) / sh_ - 0.5
+                    sc = tot / (bw * bh) ** 0.7 * (1 - 0.9 * (cxn * cxn + cyn * cyn))
+                    if y0 < sh_ * 0.1:
+                        sc *= 0.6
+                    if sc > best:
+                        best, bb = sc, (x0, y0, x0 + bw, y0 + bh)
+    if best < 0:
+        return bb
+    # grow each edge while it still cuts through detail (text, photos), so the piece ends on calm space
+    x0, y0, x1, y1 = bb
+    dens = (I[y1, x1] - I[y0, x1] - I[y1, x0] + I[y0, x0]) / max(1, (x1 - x0) * (y1 - y0))
+    lim = 0.35 * dens
+    for _ in range(sw_ + sh_):
+        grown = False
+        if x0 > 0 and g[y0:y1, x0 - 1].mean() > lim and (x1 - x0) < sw_ * 0.85:
+            x0 -= 1
+            grown = True
+        if x1 < sw_ and g[y0:y1, x1 - 1 if x1 == sw_ else x1].mean() > lim and (x1 - x0) < sw_ * 0.85:
+            x1 += 1
+            grown = True
+        if y0 > 0 and g[y0 - 1, x0:x1].mean() > lim and (y1 - y0) < sh_ * 0.7:
+            y0 -= 1
+            grown = True
+        if y1 < sh_ and g[y1 - 1 if y1 == sh_ else y1, x0:x1].mean() > lim and (y1 - y0) < sh_ * 0.7:
+            y1 += 1
+            grown = True
+        if not grown:
+            break
+    x0, y0, x1, y1 = max(0, x0 - 1), max(0, y0 - 1), min(sw_, x1 + 1), min(sh_, y1 + 1)
+    return (int(x0 * w / sw_), int(y0 * h / sh_), int(x1 * w / sw_), int(y1 * h / sh_))
+
+
 def _txt(ctx, text, role, px, color):
     if role == "mono" and is_rtl(text):
         role = "heavy"
@@ -2559,6 +2839,7 @@ def device_img(ctx, kind, screen, width):
         out.alpha_composite(lid, ((W - lid.width) // 2, 0))
         ImageDraw.Draw(out).polygon([(0, out.height - 1), (W - 1, out.height - 1), (W - (W - lid.width) // 2 + bez, lid.height),
                                      ((W - lid.width) // 2 - bez, lid.height)], fill=(34, 40, 52, 255))
+        out.info["screen"] = ((W - lid.width) // 2 + bez, bez, sw, sh)
         return out
     h = int(W * 2.05)
     bez = int(W * 0.035)
@@ -2571,6 +2852,7 @@ def device_img(ctx, kind, screen, width):
     out.alpha_composite(scr, (bez, bez))
     pw, ph = int(W * 0.3), int(W * 0.075)
     d.rounded_rectangle(((W - pw) // 2, bez + int(W * 0.03), (W + pw) // 2, bez + int(W * 0.03) + ph), ph // 2, fill=(0, 0, 0, 255))
+    out.info["screen"] = (bez, bez, sw, sh)
     return out
 
 
@@ -2688,9 +2970,17 @@ def b_kinetic(sc, ctx):
     if sc.get("clip"):
         els.append(scrim_el(ctx, "center", 0.35, 0.7))
     st0, stag = float(sc.get("start", 0.06)), float(sc.get("stagger", 0.16))
+    hot = ctx.energy >= 2
+    if hot:
+        stag = max(stag, 0.22)
+    hits = []
     for j, ((im, cy), st, spec) in enumerate(zip(lay, styles, specs)):
         t0 = st0 + stag * j
-        els.append(reveal_line(im, W / 2, cy, t0))
+        if hot:
+            els.append(Sprite(im, W / 2, cy, t0, "slam", 0.26))
+            hits.append((t0 + 0.2, "thump", 0.35))
+        else:
+            els.append(reveal_line(im, W / 2, cy, t0))
         if st == "accent" and sc.get("underline", True) and spec.get("underline", True):
             uw, uh = int(im.width * 0.62), max(3, int(8 * U))
             bar = np.asarray(pe_grad_box(uw, uh, [ctx.c["primary"], ctx.c["primary2"]], uh // 2))
@@ -2702,7 +2992,7 @@ def b_kinetic(sc, ctx):
                 if vis > 1:
                     over(out, bar[:, uw - vis:], W / 2 + uw / 2 - vis, ty)
             els.append(Fn(ul))
-    return bg, els, [(st0 + 0.02, "whoosh", 0.3)]
+    return bg, els, [(st0 + 0.02, "whoosh", 0.3)] + hits
 
 
 def card_img(ctx, item, w, h, idx):
@@ -3145,7 +3435,7 @@ def b_gallery(sc, ctx):
     n = max(1, len(items))
     per, t_in = float(sc.get("per", 0.7)), 0.45
     kind = sc.get("device", "phone")
-    dw = W * (0.46 if kind == "phone" else 0.86) * float(sc.get("device_scale", 1.0)) * (0.62 if ctx.land else 1)
+    dw = W * ((0.5 if ctx.premium else 0.46) if kind == "phone" else 0.86) * float(sc.get("device_scale", 1.0)) * (0.62 if ctx.land else 1)
     if kind == "phone":
         sw, sh = int(dw * 0.93), int(dw * 2.05 - dw * 0.07)
     else:
@@ -3163,6 +3453,8 @@ def b_gallery(sc, ctx):
         if i not in readers:
             spec = norm_clip(items[i]["src"])
             spec.setdefault("fit", "cover")
+            if pops[i] is not None and pops[i]["box"] and is_photo(spec["src"]):
+                spec.setdefault("move", "still")
             if is_photo(spec["src"]) and "move" not in spec:
                 iw, ih = Image.open(spec["src"]).size
                 if ih / iw > (sh / sw) * 1.15:
@@ -3193,7 +3485,8 @@ def b_gallery(sc, ctx):
                                 highlight=it.get("highlight", ()), max_w=W * 0.86)
                 lab = finish(lab, lab.getchannel("A"), 0.6, U=U)
             else:
-                lab = pill(ctx, it["label"], None, 38, bg=ctx.c["primary"] + (255,), fg=ink_for(ctx.c["primary"]))
+                lab = pill(ctx, it["label"], None, sc.get("label_size", 44 if ctx.premium else 38), bg=ctx.c["primary"] + (255,),
+                           fg=ink_for(ctx.c["primary"]))
             tag = pill(ctx, it["tag"], it.get("icon", "web"), 34, bg=(18, 14, 32, 238), fg=(255, 255, 255)) if it.get("tag") else None
             head_cache[i] = (np.asarray(cnt), np.asarray(lab) if lab else None, np.asarray(tag) if tag else None)
         return head_cache[i]
@@ -3202,9 +3495,127 @@ def b_gallery(sc, ctx):
     d0 = device_img(ctx, kind, Image.new("RGBA", (sw, sh), (20, 20, 28, 255)), dw)
     headline = sc.get("label_style", "pill" if (kind == "phone" or ctx.land) else "headline") == "headline"
     dev_cy = ctx.top + (ctx.bot - ctx.top) * (0.58 if kind == "phone" else (0.43 if headline else 0.55))
+    pop_cfg = sc.get("pop", True if ctx.energy >= 2 else ("alternate" if ctx.premium else None))
+    lift_t = 0.55 if ctx.premium else 0.34
+
+    def pop_of(i):
+        v = items[i].get("pop")
+        if v is None and pop_cfg:
+            v = (i % 2 == 0) if pop_cfg == "alternate" else bool(pop_cfg)
+        if not v:
+            return None
+        d_ = v if isinstance(v, dict) else {}
+        return {"box": d_.get("box"), "at": float(d_.get("at", 0.3 if ctx.premium else 0.22)),
+                "scale": float(d_.get("scale", 1.35 if ctx.premium else 1.8)), "radius": d_.get("radius")}
+    pops = [pop_of(i) for i in range(n)]
+    pop_boxes = {}
+
+    def draw_pop(out, i, u, fr, dev, im, ry, rx, ox_, oy_, dur_i):
+        pp = pops[i]
+        if pp is None or u < pp["at"]:
+            return
+        if i not in pop_boxes:
+            src_piece = None
+            spec_i = norm_clip(items[i]["src"])
+            if pp["box"] and is_photo(spec_i["src"]) and spec_i.get("move", "still") == "still":
+                # an exact element box (e.g. measured in the browser): cut the piece from the original at full
+                # resolution and map it onto the screen the way Reader frames a still photo
+                b = pp["box"]
+                from PIL import ImageOps
+                src_im = ImageOps.exif_transpose(Image.open(spec_i["src"])).convert("RGB")
+                iw, ih = src_im.size
+                fh, fw_ = fr.shape[:2]
+                sc_ = max(fw_ / iw, fh / ih) * 1.02
+                bw_, bh_ = max(fw_, round(iw * sc_)), max(fh, round(ih * sc_))
+                fxf, fyf = spec_i.get("focus", [0.5, 0.45])
+                cxs = min(max(bw_ * fxf, fw_ / 2), bw_ - fw_ / 2)
+                cys = min(max(bh_ * fyf, fh / 2), bh_ - fh / 2)
+                mx_, my_ = bw_ / iw, bh_ / ih
+                pop_boxes[i] = (int(b[0] * iw * mx_ - (cxs - fw_ / 2)), int(b[1] * ih * my_ - (cys - fh / 2)),
+                                int(b[2] * iw * mx_ - (cxs - fw_ / 2)), int(b[3] * ih * my_ - (cys - fh / 2)))
+                src_piece = src_im.crop((int(b[0] * iw), int(b[1] * ih), int(b[2] * iw), int(b[3] * ih)))
+                if pp.get("radius") is not None:
+                    pp["_r"] = max(2, int(float(pp["radius"]) * iw))
+            elif pp["box"]:
+                b = pp["box"]
+                pop_boxes[i] = (int(b[0] * fr.shape[1]), int(b[1] * fr.shape[0]), int(b[2] * fr.shape[1]), int(b[3] * fr.shape[0]))
+            else:
+                pop_boxes[i] = pop_box(fr)
+            pp["_piece"] = src_piece
+        x0, y0, x1, y1 = pop_boxes[i]
+        if x1 - x0 < 8 or y1 - y0 < 8:
+            return
+        sx, sy, ssw, ssh = dev.info["screen"]
+        kx, ky = ssw / fr.shape[1], ssh / fr.shape[0]
+        mp = tilt_mapper(dev.width, dev.height, ry, rx)
+
+        def to_out(a, b):
+            X, Y = mp(sx + a * kx, sy + b * ky)
+            return X + ox_, Y + oy_
+        q0 = [to_out(x0, y0), to_out(x1, y0), to_out(x1, y1), to_out(x0, y1)]
+        lp = clamp((u - pp["at"]) / lift_t)
+        e, ea = (e_expo(lp), e_cubic(lp)) if ctx.premium else (e_back(lp), e_cubic(lp))
+        fa = 1.0 if i == n - 1 else clamp((dur_i - u) / 0.1)
+        if fa <= 0:
+            return
+        w0 = math.hypot(q0[1][0] - q0[0][0], q0[1][1] - q0[0][1])
+        h0 = math.hypot(q0[3][0] - q0[0][0], q0[3][1] - q0[0][1])
+        wt = min(W * 0.86, w0 * pp["scale"])
+        ht = wt * h0 / max(1.0, w0)
+        cap = H * (0.42 if ctx.premium else 0.34)
+        if ht > cap:
+            wt, ht = wt * cap / ht, cap
+        side = 1 if i % 2 else -1
+        cx0 = sum(q[0] for q in q0) / 4
+        cy0 = sum(q[1] for q in q0) / 4
+        if ctx.premium:
+            # glide out toward the viewer and past the side of the device, with a gentle 3D turn
+            out_x = cx0 + (1 if cx0 >= W / 2 else -1) * W * 0.12
+            cxt = min(max(out_x, W * 0.03 + wt / 2), W * 0.97 - wt / 2)
+            cyt = min(max(cy0 - H * 0.02, ctx.top + ht / 2 + 10 * U), ctx.bot - ht / 2)
+            q1 = card_quad(cxt, cyt, wt, ht, (-10 if cxt >= W / 2 else 10), -4)
+        else:
+            cxt = min(max(W / 2 + side * W * 0.05, W * 0.03 + wt / 2), W * 0.97 - wt / 2)
+            # rise until the piece sticks out over the top edge of the device
+            cyt = max(ctx.top + ht / 2 + 10 * U, min(cy0 - H * 0.06, oy_ + ht * 0.3))
+            q1 = card_quad(cxt, cyt, wt, ht, -side * 14, -8)
+        q = [(a[0] + (b[0] - a[0]) * e, a[1] + (b[1] - a[1]) * e) for a, b in zip(q0, q1)]
+        # the piece itself (full resolution when cut from the original), with its real corner radius
+        if pp.get("_piece") is not None:
+            piece = pp["_piece"].convert("RGBA")
+        else:
+            piece = Image.fromarray(np.ascontiguousarray(fr[y0:y1, x0:x1])).convert("RGBA")
+        rr = pp.get("_r") or max(4, int(min(piece.width, piece.height) * 0.06))
+        piece.putalpha(rounded_mask(piece.width, piece.height, rr))
+        if not ctx.premium:
+            ImageDraw.Draw(piece).rounded_rectangle((0, 0, piece.width - 1, piece.height - 1), rr, outline=(255, 255, 255, 235),
+                                                    width=max(2, int(3 * piece.width / max(1.0, wt))))
+        # the slot it leaves behind: the same rounded shape, darkened
+        hx0, hy0 = int(min(x for x, _ in q0)) - 1, int(min(y for _, y in q0)) - 1
+        hx1, hy1 = int(max(x for x, _ in q0)) + 2, int(max(y for _, y in q0)) + 2
+        hco = _persp_coeffs([(x - hx0, y - hy0) for x, y in q0], [(0, 0), (piece.width, 0), (piece.width, piece.height), (0, piece.height)])
+        ha_ = piece.getchannel("A").transform((max(1, hx1 - hx0), max(1, hy1 - hy0)), Image.PERSPECTIVE, hco, Image.BILINEAR)
+        hole = Image.new("RGBA", ha_.size, (6, 6, 12, 0))
+        hole.putalpha(ha_)
+        over(out, np.asarray(hole), hx0, hy0, (0.38 if ctx.premium else 0.75) * ea * fa)
+        bx0, by0 = int(min(x for x, _ in q)) - 2, int(min(y for _, y in q)) - 2
+        bx1, by1 = int(max(x for x, _ in q)) + 3, int(max(y for _, y in q)) + 3
+        co = _persp_coeffs([(x - bx0, y - by0) for x, y in q], [(0, 0), (piece.width, 0), (piece.width, piece.height), (0, piece.height)])
+        wp = piece.transform((max(1, bx1 - bx0), max(1, by1 - by0)), Image.PERSPECTIVE, co, Image.BICUBIC)
+        pad = int(40 * U)
+        al = Image.new("L", (wp.width + 2 * pad, wp.height + 2 * pad))
+        al.paste(wp.getchannel("A"), (pad, pad))
+        blur = al.filter(ImageFilter.GaussianBlur((26 if ctx.premium else 18) * U))
+        shd = Image.new("RGBA", al.size, (0, 0, 0, 0))
+        shd.putalpha(blur.point(lambda v: int(v * (0.7 if ctx.premium else 0.6))))
+        over(out, np.asarray(shd), bx0 - pad + (14 if ctx.premium else 20) * U * ea, by0 - pad + (40 if ctx.premium else 44) * U * ea, ea * fa)
+        glw = Image.new("RGBA", al.size, ctx.c["primary"] + (0,))
+        glw.putalpha(al.filter(ImageFilter.GaussianBlur((16 if ctx.premium else 10) * U)).point(lambda v: int(v * (0.3 if ctx.premium else 0.8))))
+        over(out, np.asarray(glw), bx0 - pad, by0 - pad, ea * fa)
+        over(out, np.asarray(wp), bx0, by0, fa)
     head_y = ctx.top + 40 * U
     gl = glow_blob(ctx, d0.width * 1.5, d0.height * 0.9, ctx.c["primary2"], 0.45)
-    swing = float(sc.get("swing", 9))
+    swing = float(sc.get("swing", 4 if ctx.premium else 9))
 
     def draw(out, t, bgf):
         i = idx(t)
@@ -3221,11 +3632,13 @@ def b_gallery(sc, ctx):
         dev = device_img(ctx, kind, Image.fromarray(fr).convert("RGBA"), dw)
         tgt = swing * (1 if i % 2 else -1)
         prv = swing * (1 if (i - 1) % 2 else -1) if i else -swing * 2.4
-        ry = prv + (tgt - prv) * e_cubic(clamp(u / 0.3)) + 1.2 * math.sin(t * 1.3)
+        ry = prv + (tgt - prv) * (e_inout(clamp(u / 0.6)) if ctx.premium else e_cubic(clamp(u / 0.3))) + 1.2 * math.sin(t * 1.3)
         rx = 4 + (1 - e) * 16 + 1.5 * math.sin(t * 0.9)
         im = tilt(dev, ry, rx)
         dy = (1 - e) * H * 0.3 + math.sin(t * 1.6) * 6 * U
         over(out, np.asarray(im), W / 2 - im.width / 2, dev_cy - im.height / 2 + dy, a)
+        pop_args = (i, u, fr, dev, im, ry, rx, W / 2 - im.width / 2, dev_cy - im.height / 2 + dy,
+                    (total - start_of(i)) if i == n - 1 else (start_of(i + 1) - start_of(i)))
         cnt, lab, tag = heads(i)
         bump = 1.0 if u > 0.18 else 0.85 + 0.15 * e_back(u / 0.18)
         ha = clamp((t - 0.15) / 0.3)
@@ -3246,7 +3659,10 @@ def b_gallery(sc, ctx):
                 arr = np.asarray(img)
             cx_ = x - arr.shape[1] / 2 if x > W * 0.6 else x
             over(out, arr, cx_ - arr.shape[1] / 2, y - arr.shape[0] / 2, ha)
+        draw_pop(out, *pop_args)
     sfx = [(0.05, "whoosh", 0.45)] + [(start_of(i), "click", 0.35) for i in range(1, n)]
+    sfx += [(start_of(i) + pops[i]["at"], "whoosh" if ctx.premium else "pop", 0.25 if ctx.premium else 0.5)
+            for i in range(n) if pops[i] is not None]
     return bg, [Fn(draw)], sfx
 
 
@@ -3445,9 +3861,17 @@ DEFAULT_TRANS = {"kinetic": "blur", "cards": "zoom", "steps": "slide_up", "devic
                  "showcase": "slide", "features": "zoom", "location": "zoom", "hook": "cut", "stamp": "glitch", "logo": "zoom", "title": "whip", "collage": "zoom",
                  "counter": "slide_up", "checklist": "zoom", "testimonial": "fade", "before_after": "whip",
                  "offer": "flash", "text": "punch", "cta": "zoom"}
-TRANS_SFX = {"zoom": "whoosh", "whip": "whoosh", "slide": "whoosh", "slide_up": "whoosh", "glitch": "glitch", "flash": "thump", "punch": "thump"}
+TRANS_SFX = {"zoom": "whoosh", "whip": "whoosh", "slide": "whoosh", "slide_up": "whoosh", "glitch": "glitch", "flash": "thump", "punch": "thump",
+             "cube": "whoosh", "spin": "whoosh", "zoom_blur": "whoosh", "slices": "whoosh", "shape": "whoosh", "diamond": "whoosh",
+             "push": "whoosh", "zoom_through": "whoosh"}
 TRANS_LEN = {"flash": 6, "zoom": 9, "whip": 9, "slide": 9, "slide_up": 9, "glitch": 7, "punch": 8, "fade": 9,
-             "leak": 14, "blur": 10}
+             "leak": 14, "blur": 10, "cube": 15, "spin": 10, "zoom_blur": 10, "slices": 12, "shape": 12, "diamond": 12,
+             "push": 14, "zoom_through": 14}
+# transitions rotated through automatically when fx energy >= 2 (scenes without their own transition)
+CRAZY_TRANS = ["cube", "zoom_blur", "slices", "spin", "shape", "whip", "diamond", "glitch"]
+# premium style: one consistent family, chosen by what the next scene is (scenes without their own transition)
+PREMIUM_TRANS = {"gallery": "zoom_through", "wall": "zoom_through", "cta": "zoom_through", "logo": "zoom_through",
+                 "bundle": "cube", "cards": "cube", "device": "cube"}
 
 
 # ----------------------------------------------------------------- transitions
@@ -3471,7 +3895,107 @@ def scale_frame(fr, s):
     return np.array(Image.fromarray(fr).transform((W, H), Image.AFFINE, (a, 0, W * (1 - a) / 2, 0, a, H * (1 - a) / 2), Image.BILINEAR))
 
 
-def transition(kind, out, prev, k, U, rng):
+def affine_frame(fr, s=1.0, rot=0.0, dx=0.0, dy=0.0):
+    """Scale (about the centre), rotate (degrees) and shift a frame; the scale is raised as needed so no edge shows."""
+    H, W = fr.shape[:2]
+    a = math.radians(rot)
+    ca, sa = math.cos(a), abs(math.sin(a))
+    s = max(s, max(ca + H / W * sa, ca + W / H * sa) + 2 * max(abs(dx) / W, abs(dy) / H))
+    c, sn = math.cos(-a) / s, math.sin(-a) / s
+    cx, cy = W / 2, H / 2
+    A = (c, -sn, cx - c * (cx + dx) + sn * (cy + dy), sn, c, cy - sn * (cx + dx) - c * (cy + dy))
+    return np.asarray(Image.fromarray(fr).transform((W, H), Image.AFFINE, A, Image.BILINEAR))
+
+
+_DIST = {}
+
+
+def _dist_map(W, H, kind):
+    """Distance from the frame centre, 1.0 at the corners (circle) or along the diagonal edges (diamond)."""
+    key = (W, H, kind)
+    if key not in _DIST:
+        yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
+        cx, cy = W / 2, H / 2
+        if kind == "diamond":
+            _DIST[key] = (np.abs(xx - cx) + np.abs(yy - cy)) / (cx + cy)
+        else:
+            _DIST[key] = np.sqrt((xx - cx) ** 2 + (yy - cy) ** 2) / math.hypot(cx, cy)
+    return _DIST[key]
+
+
+def bg_energy(out, T, t, ctx):
+    """Energy background (fx energy >= 2): light streaks rising across the frame and a ring that bursts from the
+    centre on every beat, both in the theme colour and brighter on the beat. T = global time, t = scene time."""
+    W, H, U = ctx.W, ctx.H, ctx.U
+    w2, h2 = max(2, W // 2), max(2, H // 2)
+    if getattr(ctx, "_streaks", None) is None:
+        ctx._streaks = np.random.default_rng(3).random((14, 5))
+    m = Image.new("L", (w2, h2))
+    d = ImageDraw.Draw(m)
+    b = beat_env(ctx, t)
+    gain = 0.55 + 0.45 * b
+    ang = math.radians(-16)
+    for prm in ctx._streaks:
+        speed = 0.5 + 1.3 * prm[0]
+        L = (0.18 + 0.4 * prm[1]) * h2
+        x = prm[2] * (w2 * 1.3) - w2 * 0.15
+        y = h2 * 1.3 - ((prm[3] + T * speed) % 1.0) * h2 * 1.9
+        width = max(1, int((1 + 3 * prm[4]) * U))
+        d.line([(x, y), (x + L * math.sin(ang), y + L * math.cos(ang))], fill=int((70 + 130 * prm[4]) * gain), width=width)
+    for bt in getattr(ctx, "_beats_now", []):
+        x_ = t - bt
+        if 0 <= x_ < 0.55:
+            r = (0.05 + x_ / 0.55 * 0.85) * h2 * 0.75
+            d.ellipse((w2 / 2 - r, h2 / 2 - r, w2 / 2 + r, h2 / 2 + r), outline=int(170 * (1 - x_ / 0.55)), width=max(1, int(3 * U)))
+    m = m.filter(ImageFilter.GaussianBlur(1.3)).resize((W, H), Image.BILINEAR)
+    col = (np.array(ctx.c["primary"], np.float32) * 0.65 + 255 * 0.35) / 255.0
+    add = np.asarray(m, np.float32)[..., None] * col
+    return np.clip(out.astype(np.float32) + add, 0, 255).astype(np.uint8)
+
+
+def camera_fx(out, t, hits, ctx):
+    """Energy FX: zoom punches on beats and hits, camera shake and a chromatic split on strong hits."""
+    E = ctx.energy / 2.0
+    s, dx, dy, rot, ch = 1.0, 0.0, 0.0, 0.0, 0.0
+    glitch = None
+    for (th, strong, ph) in hits:
+        x = t - th
+        if x < 0 or x > 0.7:
+            continue
+        s += (0.08 if strong else (0.045 if strong is None else 0.03)) * E * math.exp(-x / 0.11)
+        if strong:
+            se = math.exp(-x / 0.14)
+            dx += 22 * ctx.U * E * se * (0.6 * math.sin(2 * math.pi * 17 * x + ph) + 0.4 * math.sin(2 * math.pi * 29 * x + 2 * ph))
+            dy += 16 * ctx.U * E * se * (0.6 * math.sin(2 * math.pi * 19 * x + 3 * ph) + 0.4 * math.sin(2 * math.pi * 31 * x + ph))
+            rot += 1.0 * E * se * math.sin(2 * math.pi * 11 * x + 5 * ph)
+            ch = max(ch, 10 * ctx.U * E * math.exp(-x / 0.07))
+            if x < 0.07:
+                glitch = (x, ph)
+    s = min(s, 1.2)
+    if s - 1 < 1e-3 and abs(dx) < 0.3 and abs(dy) < 0.3 and abs(rot) < 0.02 and ch < 0.5:
+        return out
+    out = affine_frame(out, s, rot, dx, dy)
+    c = int(round(ch))
+    if c >= 1 or glitch:
+        o = out.copy()
+        if c >= 1:
+            o[:, c:, 0] = out[:, :-c, 0]
+            o[:, :-c, 2] = out[:, c:, 2]
+        if glitch:
+            H, W = o.shape[:2]
+            g_ = np.random.default_rng(int(glitch[1] * 1000) + int(glitch[0] * 300))
+            for _ in range(2 + ctx.energy):
+                y0 = int(g_.integers(0, max(1, H - 20)))
+                hh = int(g_.integers(max(4, int(H * 0.01)), max(5, int(H * 0.05))))
+                o[y0:y0 + hh] = np.roll(o[y0:y0 + hh], int(g_.integers(-50, 50) * ctx.U), 1)
+            if ctx.energy >= 3:
+                f = 0.3 * math.exp(-glitch[0] / 0.035)
+                o = (o * (1 - f) + 255 * f).astype(np.uint8)
+        out = o
+    return out
+
+
+def transition(kind, out, prev, k, U, rng, ctx=None):
     m = TRANS_LEN.get(kind, 0)
     if kind == "cut" or k >= m:
         return out
@@ -3543,6 +4067,90 @@ def transition(kind, out, prev, k, U, rng):
             h = int(rng.integers(8, max(9, int(H * 0.06))))
             fr[y0:y0 + h] = np.roll(fr[y0:y0 + h], int(rng.integers(-60, 60) * U), 1)
         return fr
+    if kind == "push":
+        e = e_inout(p)
+        off = int(W * e)
+        fr = np.empty_like(out)
+        fr[:, off:] = prev[:, :W - off]
+        fr[:, :off] = out[:, W - off:]
+        return hblur(fr, int(60 * U * math.sin(math.pi * p) ** 2), 1)
+    if kind == "zoom_through":
+        e = e_inout(p)
+        a = scale_frame(prev, 1 + 0.4 * e)
+        b = scale_frame(out, 1.15 - 0.15 * e)
+        m = e_inout(clamp((p - 0.25) / 0.5))
+        mix = (a.astype(np.float32) * (1 - m) + b.astype(np.float32) * m).astype(np.uint8)
+        k = int(18 * U * math.sin(math.pi * p) ** 2)
+        return hblur(hblur(mix, k, 1), k, 0)
+    if kind == "cube":
+        th = math.pi / 2 * e_inout(p)
+        D = 2.2 * W * (1 + 0.3 * math.sin(math.pi * p))
+        Zc = D + W / 2
+
+        def proj(x, y, z):
+            x2, z2 = x * math.cos(th) - z * math.sin(th), x * math.sin(th) + z * math.cos(th)
+            f = D / (Zc + z2)
+            return (W / 2 + x2 * f, H / 2 + y * f)
+        small = Image.fromarray(out).resize((max(1, W // 24), max(1, H // 24)), Image.BILINEAR)
+        canvas = small.resize((W, H), Image.BILINEAR).point(lambda v: int(v * 0.3))
+        hw, hh = W / 2, H / 2
+        for img, pts, lit in ((prev, [(-hw, -hh, -hw), (hw, -hh, -hw), (hw, hh, -hw), (-hw, hh, -hw)], math.cos(th)),
+                              (out, [(-hw, -hh, hw), (-hw, -hh, -hw), (-hw, hh, -hw), (-hw, hh, hw)], math.sin(th))):
+            if lit < 0.03:
+                continue
+            co = _persp_coeffs([proj(*pt) for pt in pts], [(0, 0), (W, 0), (W, H), (0, H)])
+            src = Image.fromarray((img.astype(np.float32) * (0.35 + 0.65 * lit)).astype(np.uint8))
+            mask = Image.new("L", (W, H), 255).transform((W, H), Image.PERSPECTIVE, co, Image.BILINEAR)
+            canvas.paste(src.transform((W, H), Image.PERSPECTIVE, co, Image.BILINEAR), (0, 0), mask)
+        return np.asarray(canvas)
+    if kind == "spin":
+        e = e_inout(p)
+        v = math.sin(math.pi * p)
+        if p < 0.5:
+            src, ang, s = prev, 30 * (2 * e), 1 + 0.45 * (2 * e)
+        else:
+            src, ang, s = out, -30 * (2 - 2 * e), 1 + 0.45 * (2 - 2 * e)
+        acc = np.zeros((H, W, 3), np.float32)
+        for d in (-1, 0, 1):
+            acc += affine_frame(src, s, ang + d * 6 * v)
+        return (acc / 3).astype(np.uint8)
+    if kind == "zoom_blur":
+        if p < 0.5:
+            q, src = p / 0.5, prev
+        else:
+            q, src = (1 - p) / 0.5, out
+        z = 1 + 2.4 * q * q
+        acc = np.zeros((H, W, 3), np.float32)
+        for j in range(5):
+            acc += scale_frame(src, z * (1 + 0.12 * q * j / 4))
+        acc /= 5
+        fl = 0.4 * math.exp(-((p - 0.5) / 0.1) ** 2)
+        return np.clip(acc * (1 - fl) + 255 * fl, 0, 255).astype(np.uint8)
+    if kind == "slices":
+        n = 6
+        fr = prev.copy()
+        for j in range(n):
+            x0, x1 = W * (n - 1 - j) // n, W * (n - j) // n
+            pj = clamp((p - j * 0.07) / (1 - (n - 1) * 0.07))
+            if pj <= 0:
+                continue
+            off = int((1 - e_cubic(pj)) * H) * (1 if j % 2 else -1)
+            if off >= 0:
+                fr[off:, x0:x1] = out[:H - off, x0:x1]
+            else:
+                fr[:H + off, x0:x1] = out[-off:, x0:x1]
+        return fr
+    if kind in ("shape", "diamond"):
+        d = _dist_map(W, H, kind)
+        r = e_inout(p) * 1.08
+        m_ = np.clip((r - d) / 0.006 + 0.5, 0, 1)[..., None]
+        fr = prev.astype(np.float32) * (1 - m_) + out.astype(np.float32) * m_
+        col = np.array(ctx.c["primary"] if ctx is not None else (255, 255, 255), np.float32)
+        a1 = np.clip(1 - np.abs(d - r) / 0.016, 0, 1)[..., None]
+        a2 = np.clip(1 - np.abs(d - r * 0.8) / 0.006, 0, 1)[..., None] * 0.9
+        fr = fr * (1 - a1) + col * a1
+        fr = fr * (1 - a2) + 255 * a2
+        return np.clip(fr, 0, 255).astype(np.uint8)
     return out
 
 
@@ -3693,6 +4301,17 @@ def make_plan(brief, ctx, workdir):
         sc["_n"] = int(bounds[i + 1] - bounds[i])
         sc["_dur"] = sc["_n"] / ctx.fps
         sc["_t0"] = bounds[i] / ctx.fps
+        if ctx.premium:
+            sc["_premium"] = 1
+            if i and "transition" not in sc:
+                sc["transition"] = PREMIUM_TRANS.get(sc["type"], "push")
+        if ctx.energy:
+            sc["_energy"] = ctx.energy
+            if len(beats):
+                b = beats[(beats >= sc["_t0"] - 1e-3) & (beats < sc["_t0"] + sc["_dur"] - 0.05)] - sc["_t0"]
+                sc["_beats"] = [round(float(x), 3) for x in b]
+            if i and ctx.energy >= 2 and "transition" not in sc:
+                sc["transition"] = CRAZY_TRANS[(i - 1) % len(CRAZY_TRANS)]
         sc.setdefault("transition", DEFAULT_TRANS.get(sc["type"], "cut") if i else "cut")
         for key in ("clip", "before", "after"):
             if sc.get(key):
@@ -3745,9 +4364,26 @@ def build(sc, ctx):
 def frames(sc, ctx, k0=0, count=None, prev=None):
     n = sc["_n"]
     count = n - k0 if count is None else count
-    bg, els, _, extra = build(sc, ctx)
+    bg, els, sfx_ev, extra = build(sc, ctx)
     W, H = ctx.W, ctx.H
     reader = None
+    hits = []
+    if ctx.energy and sc.get("fx", True) is not False:
+        raw = [(0.0, True)] if sc["_t0"] > 0 else []
+        for (tt, name, g) in sfx_ev:
+            if name in ("impact", "thump", "reveal"):
+                raw.append((tt, True))
+            elif name in ("pop", "click") and ctx.energy >= 2:
+                raw.append((tt, False))
+        if ctx.energy >= 2:
+            raw += [(b, None if j % 2 == 0 else False) for j, b in enumerate(sc.get("_beats", []))]
+        rng_h = np.random.default_rng(sc["_seed"] % 2 ** 32 + 77)
+        for tt, st in sorted(raw):
+            if hits and tt - hits[-1][0] < 0.06:
+                prev_st = hits[-1][1]
+                hits[-1] = (hits[-1][0], True if (prev_st or st) else (None if None in (prev_st, st) else False), hits[-1][2])
+            else:
+                hits.append((tt, st, float(rng_h.uniform(0, 2 * math.pi))))
     if bg["kind"] == "clip":
         lk = dict(ctx.grade)
         lk.update(bg.get("look") or {})
@@ -3758,12 +4394,16 @@ def frames(sc, ctx, k0=0, count=None, prev=None):
     rng = np.random.default_rng(sc["_seed"] % 2 ** 32)
     shake = extra.get("shake")
     drift = float(sc.get("drift", ctx.drift if sc["type"] not in ("collage", "device") else 0))
+    ctx._beats_now = sc.get("_beats", []) if ctx.energy >= 2 else []
+    live_bg = ctx.energy >= 2 and bg["kind"] == "panel" and sc.get("fx", True) is not False
     try:
         for k in range(k0, k0 + count):
             t = k / ctx.fps
             pnow = ctx.panel_frame(sc["_t0"] + t) if animated else base
             bgf = reader.next() if reader else pnow
             out = pnow.copy() if (bg.get("hide") or reader is None) else bgf.copy()
+            if live_bg:
+                out = bg_energy(out, sc["_t0"] + t, t, ctx)
             for el in els:
                 el.draw(out, t, ctx, bgf)
             if shake and shake[0] <= t < shake[0] + shake[1]:
@@ -3774,9 +4414,13 @@ def frames(sc, ctx, k0=0, count=None, prev=None):
                 cw_, ch_ = W / z, H / z
                 x0_, y0_ = (W - cw_) / 2, (H - ch_) / 2
                 out = np.array(Image.fromarray(out).resize((W, H), Image.BILINEAR, box=(x0_, y0_, x0_ + cw_, y0_ + ch_)))
+            if hits:
+                out = camera_fx(out, t, hits, ctx)
+            elif ctx.premium and sc["_t0"] > 0 and t < 0.9 and sc.get("fx", True) is not False:
+                out = affine_frame(out, 1 + 0.03 * (1 - e_cubic(t / 0.9)))
             if ctx.captions:
                 draw_captions(out, sc["_t0"] + t, ctx)
-            out = transition(sc["transition"], out, prev, k, ctx.U, rng)
+            out = transition(sc["transition"], out, prev, k, ctx.U, rng, ctx)
             yield out
     finally:
         if reader:
@@ -3950,10 +4594,15 @@ def build_audio(brief, scenes, ctx, out_wav):
             return bank[name]
         gain = float(brief.get("sfx_volume", 0.55))
         for i, sc in enumerate(scenes):
-            ev = list(build(sc, ctx)[2]) if sc["type"] not in ("collage",) else [(0.4, "whoosh", 0.4)]
+            if "_sfx" in sc:  # set by the web renderer
+                ev = list(sc["_sfx"])
+            else:
+                ev = list(build(sc, ctx)[2]) if sc["type"] not in ("collage",) else [(0.4, "whoosh", 0.4)]
             tr = sc.get("transition")
             if i and tr in TRANS_SFX:
                 ev.append((0.0, TRANS_SFX[tr], 0.6))
+            if i and ctx.energy >= 2 and tr not in ("flash", "punch"):
+                ev.append((0.0, "thump", 0.25 + 0.1 * ctx.energy))
             for (tt, name, g) in ev:
                 y, lead = get(name)
                 if tt > sc["_dur"]:
@@ -4589,6 +5238,44 @@ def selftest(workers=2):
     finally:
         os.chdir(cwd)
     rep = json.load(open(os.path.join(d, "selftest_qa.json"))) if os.path.exists(os.path.join(d, "selftest_qa.json")) else {}
+    # second pass: the same scenes with fx energy 3 (beat punches, shake, crazy transitions, gallery pop-outs)
+    bfx = dict(brief, out="selftest_fx.mp4", fx={"energy": 3}, music_free_version=False)
+    bfx.pop("voiceover", None)
+    bpx = os.path.join(d, "brief_fx.json")
+    json.dump(bfx, open(bpx, "w"), ensure_ascii=False)
+    try:
+        run(bpx, os.path.join(d, "selftest_fx.mp4"), "9x16", True, workers, False, None, cleanup=True, creative=None, do_qa=True)
+    finally:
+        os.chdir(cwd)
+    qfx = os.path.join(d, "selftest_fx_qa.json")
+    rfx = json.load(open(qfx)) if os.path.exists(qfx) else {"errors": ["energy render missing"]}
+    rep.setdefault("errors", []).extend("fx pass: " + e for e in rfx.get("errors", []))
+    print("fx pass:", "ok" if os.path.exists(os.path.join(d, "selftest_fx.mp4")) and not rfx.get("errors") else "FAILED")
+    # third pass: the browser renderer ("renderer": "web") on the scene types it draws
+    web_types = ("kinetic", "contrast", "gallery", "wall", "bundle", "logo", "cta")
+    bw = dict(brief, out="selftest_web.mp4", renderer="web", music_free_version=False,
+              scenes=[dict(sc_) for sc_ in brief["scenes"] if sc_["type"] in web_types])
+    bw.pop("voiceover", None)
+    bw["scenes"][3]["items"][0]["pop"] = {"box": [0.2, 0.2, 0.8, 0.6], "scale": 1.3}
+    bpw = os.path.join(d, "brief_web.json")
+    json.dump(bw, open(bpw, "w"), ensure_ascii=False)
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import promo_web
+        prob = promo_web.browser_problem()
+    except ImportError:
+        prob = "promo_web.py is missing next to promo_engine.py"
+    if prob:
+        print("web pass: skipped -", prob)
+    else:
+        try:
+            promo_web.run_web(bpw, os.path.join(d, "selftest_web.mp4"), "9x16", True, workers, False, None, do_qa=True)
+        finally:
+            os.chdir(cwd)
+        qw = os.path.join(d, "selftest_web_qa.json")
+        rw = json.load(open(qw)) if os.path.exists(qw) else {"errors": ["web render missing"]}
+        rep.setdefault("errors", []).extend("web pass: " + e for e in rw.get("errors", []))
+        print("web pass:", "ok" if os.path.exists(os.path.join(d, "selftest_web.mp4")) and not rw.get("errors") else "FAILED")
     os.chdir(d)
     caps = build_captions(brief)
     os.chdir(cwd)
@@ -4809,6 +5496,13 @@ def main():
             wd = stem + "_work"
             if var:
                 stem += "_" + var
+            if load_brief(bp).get("renderer") == "web":
+                # the browser renderer (promo_web.py, next to this file): CSS 3D, motion blur, sharp type
+                sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+                import promo_web
+                promo_web.run_web(bp, stem + ext, fmt, a.draft, a.workers, a.preview, a.frame, wd, creative=creative,
+                                  do_qa=not a.no_qa, plan=a.plan)
+                continue
             run(bp, stem + ext, fmt, a.draft, a.workers, a.preview, a.frame, wd, cleanup=len(variants) == 1,
                 creative=creative, do_qa=not a.no_qa, plan=a.plan)
 
@@ -4817,3 +5511,1226 @@ if __name__ == "__main__":
     main()
 ```
 <!-- ENGINE:END -->
+
+## Web renderer
+
+<!-- WEB:BEGIN -->
+```python
+"""promo_web - the browser renderer of promo-reel-maker (v4).
+
+Every scene is laid out in HTML/CSS and animated by a seek(t) function; Chrome (driven by Playwright) draws each
+frame - real CSS 3D (phones, laptops, cubes, pop-outs), smooth sub-pixel motion, soft shadows and sharp type - and
+each frame is captured with motion blur. Planning, beat sync, the audio mix, the cover and QA come from
+promo_engine, so a brief renders the same story with either renderer.
+
+Use: "renderer": "web" in the brief (promo_engine dispatches here), or python3 promo_web.py brief.json [...]
+Needs: pip install playwright --break-system-packages, and Chrome or Chromium (CHROME env var, a system Chrome,
+or `python3 -m playwright install chromium`).
+"""
+import hashlib
+import html as _html
+import io
+import json
+import math
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+from multiprocessing import Process
+
+import numpy as np
+from PIL import Image
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import promo_engine as pe  # noqa: E402
+
+WEB_VERSION = "4.0.0"
+WEB_TYPES = {"kinetic", "contrast", "gallery", "wall", "bundle", "cta", "logo", "counter", "stat", "stats", "title"}
+TRANS_MAP = {"cut": "cut", "flash": "flash", "punch": "zoom_through", "fade": "fade", "zoom": "zoom_through",
+             "whip": "push", "slide": "push", "slide_up": "push_up", "glitch": "zoom_through", "blur": "blur",
+             "leak": "fade", "cube": "cube", "spin": "zoom_through", "zoom_blur": "zoom_through", "slices": "push_up",
+             "shape": "shape", "diamond": "diamond", "push": "push", "zoom_through": "zoom_through"}
+TRANS_DUR = {"cut": 0, "flash": 0.3, "fade": 0.45, "blur": 0.5, "push": 0.55, "push_up": 0.55, "zoom_through": 0.6,
+             "cube": 0.75, "shape": 0.65, "diamond": 0.65}
+TRANS_SFX = {"push": "whoosh", "push_up": "whoosh", "zoom_through": "whoosh", "cube": "whoosh", "shape": "whoosh",
+             "diamond": "whoosh", "flash": "thump"}
+
+
+def find_chrome():
+    for c in (os.environ.get("CHROME"), "/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium",
+              "/usr/bin/chromium-browser", shutil.which("google-chrome") or "", shutil.which("chromium") or ""):
+        if c and os.path.exists(c):
+            return c
+    return None  # Playwright's own bundled Chromium, if installed
+
+
+def esc(s):
+    # a hyphen between two words (ו-ERP, e-commerce) must not become a line break
+    return _html.escape(re.sub(r"(?<=[^\W\d_])-(?=\S)|(?<=\S)-(?=[^\W\d_])", "\u2011", str(s)), quote=True)
+
+
+def hexc(c):
+    return "#%02x%02x%02x" % tuple(int(v) for v in c[:3])
+
+
+def rgba(c, a):
+    return f"rgba({int(c[0])},{int(c[1])},{int(c[2])},{a})"
+
+
+def words_html(text, cls="w", hl=(), hl_digits=False):
+    """Wrap each word in a span (for word-by-word reveals); words containing a highlight term get class hl."""
+    out = []
+    for w in str(text).split():
+        hot = any(h and h in w for h in hl) or (hl_digits and any(ch.isdigit() for ch in w))
+        out.append(f'<span class="{cls}{" hl" if hot else ""}">{esc(w)}</span>')
+    return " ".join(out)
+
+
+class P:
+    """Layout and style values of one render, shared by the scene builders."""
+
+    def __init__(self, ctx, workdir):
+        self.ctx, self.wd = ctx, workdir
+        self.W, self.H, self.U = ctx.W, ctx.H, ctx.U
+        self.top, self.bot, self.cy = ctx.top, ctx.bot, ctx.cy
+        self.c = ctx.c
+        self.land = ctx.land
+        self.n_assets = 0
+
+    def u(self, v):
+        return f"{v * self.U:.2f}px"
+
+    def asset(self, img, name=None, quality=93):
+        """Save a PIL image into the work folder and return its file URL."""
+        self.n_assets += 1
+        name = name or f"a{self.n_assets:03d}"
+        ext = "png" if img.mode == "RGBA" else "jpg"
+        p = os.path.join(self.wd, "web", f"{name}.{ext}")
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        if ext == "png":
+            img.save(p)
+        else:
+            img.convert("RGB").save(p, quality=quality)
+        return "file://" + os.path.abspath(p)
+
+    def src(self, path):
+        """File URL of a brief media path (relative to the brief folder)."""
+        return "file://" + os.path.abspath(path)
+
+    def still(self, spec):
+        """Image path for a media spec: photos as they are; for a video, one frame (spec start, else 35% in)."""
+        spec = pe.norm_clip(spec)
+        src = spec["src"]
+        if pe.is_photo(src):
+            return src
+        dur = pe.probe(src)[2] or 1.0
+        at = float(spec.get("start", dur * 0.35))
+        p = os.path.join(self.wd, "web", "still_" + hashlib.md5(f"{os.path.abspath(src)}|{at}".encode()).hexdigest()[:12] + ".jpg")
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        if not os.path.exists(p):
+            subprocess.run([pe.FFMPEG, "-v", "error", "-y", "-ss", f"{at:.3f}", "-i", src, "-frames:v", "1", "-q:v", "2", p])
+        if not os.path.exists(p):
+            raise SystemExit(f"[web] could not read a frame from {src}")
+        return p
+
+
+# ----------------------------------------------------------------- runtime (JS)
+RUNTIME = r"""
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const prog = (t, t0, d) => d <= 0 ? (t >= t0 ? 1 : 0) : clamp((t - t0) / d);
+const lerp = (a, b, p) => a + (b - a) * p;
+const expoOut = p => p >= 1 ? 1 : 1 - Math.pow(2, -10 * p);
+const cubicOut = p => 1 - Math.pow(1 - p, 3);
+const quintOut = p => 1 - Math.pow(1 - p, 5);
+const cubicIn = p => p * p * p;
+const cubicInOut = p => p < .5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
+const sineInOut = p => -(Math.cos(Math.PI * p) - 1) / 2;
+const backOut = (p, s = 1.2) => 1 + (s + 1) * Math.pow(p - 1, 3) + s * Math.pow(p - 1, 2);
+const $ = id => document.getElementById(id);
+const U = window.__U;
+
+// word-by-word reveal: rise from below with a slight 3D tilt, out of a blur
+function reveal(el, t, t0, o = {}) {
+  if (!el) return;
+  const step = o.step ?? 0.07, dur = o.dur ?? 0.65, rise = (o.rise ?? 0.55), out = o.out;
+  [...el.querySelectorAll('.w')].forEach((s, i) => {
+    const p = prog(t, t0 + i * step, dur), e = expoOut(p);
+    let a = clamp(p * 1.8), y = (1 - e) * rise, rx = (1 - e) * (o.tilt ?? 55), b = (1 - cubicOut(p)) * (o.blur ?? 14);
+    if (out !== undefined) {
+      const q = cubicInOut(prog(t, out + i * 0.035, 0.35));
+      a *= 1 - q; y -= q * 0.4; b += q * 10;
+    }
+    s.style.opacity = a;
+    s.style.transform = `translateY(${y}em) rotateX(${rx}deg)`;
+    s.style.filter = b > 0.3 ? `blur(${b * U}px)` : 'none';
+  });
+}
+// fade/slide a block in (and optionally out)
+function enter(el, t, t0, o = {}) {
+  if (!el) return 0;
+  const p = prog(t, t0, o.dur ?? 0.7), e = (o.ease ?? expoOut)(p);
+  let a = clamp(p * 2), y = (1 - e) * (o.y ?? 40) * U, s = lerp(o.s ?? 0.96, 1, e);
+  if (o.out !== undefined) { const q = cubicInOut(prog(t, o.out, o.outDur ?? 0.35)); a *= 1 - q; y -= q * 20 * U; }
+  el.style.opacity = a;
+  el.style.transform = `${o.base ?? ''} translateY(${y}px) scale(${s})`;
+  return e;
+}
+function typeText(el, text, t, t0, cps) {
+  const n = Math.floor(clamp((t - t0) * cps, 0, text.length));
+  el.textContent = text.slice(0, n);
+  return n >= text.length;
+}
+function sheen(el, t, t0, dur = 0.9) {
+  if (!el) return;
+  const p = prog(t, t0, dur);
+  el.style.opacity = p > 0 && p < 1 ? 1 : 0;
+  el.style.transform = `translateX(${lerp(-130, 130, sineInOut(p))}%) skewX(-18deg)`;
+}
+
+// ---- transitions between scene layers (p: 0..1)
+function trans(kind, p, a, b) {
+  const e = cubicInOut(p);
+  if (kind === 'fade') { b.style.opacity = e; }
+  else if (kind === 'blur') { a.style.filter = `blur(${24 * e * U}px)`; a.style.opacity = 1 - e; b.style.opacity = e; b.style.transform = `scale(${lerp(1.04, 1, e)})`; }
+  else if (kind === 'flash') { b.style.opacity = p > 0.5 ? 1 : 0; $('flash').style.opacity = 1 - Math.abs(p - 0.5) * 2; }
+  else if (kind === 'push') { a.style.transform = `translateX(${100 * e}%)`; b.style.transform = `translateX(${-100 + 100 * e}%)`; }
+  else if (kind === 'push_up') { a.style.transform = `translateY(${-100 * e}%)`; b.style.transform = `translateY(${100 - 100 * e}%)`; }
+  else if (kind === 'zoom_through') {
+    a.style.transform = `scale(${1 + 0.6 * e})`; a.style.opacity = 1 - clamp((p - 0.15) / 0.55);
+    b.style.transform = `scale(${lerp(0.82, 1, quintOut(p))})`; b.style.opacity = clamp((p - 0.2) / 0.5);
+  }
+  else if (kind === 'cube') {
+    const o = `50% 50% ${-window.__W / 2}px`;
+    a.style.transformOrigin = o; b.style.transformOrigin = o;
+    a.style.transform = `rotateY(${90 * e}deg)`; b.style.transform = `rotateY(${-90 + 90 * e}deg)`;
+    a.style.filter = `brightness(${1 - 0.5 * e})`; b.style.filter = `brightness(${0.5 + 0.5 * e})`;
+  }
+  else if (kind === 'shape' || kind === 'diamond') {
+    const r = 120 * e;
+    b.style.clipPath = kind === 'shape' ? `circle(${r * 0.75}% at 50% 50%)`
+      : `polygon(50% ${50 - r}%, ${50 + r}% 50%, 50% ${50 + r}%, ${50 - r}% 50%)`;
+    const ring = $('ring'); ring.style.opacity = p < 0.98 ? 1 : 0;
+    const R = Math.hypot(window.__W, window.__H) * 0.75 * e * 1.2 / 2;
+    ring.style.width = ring.style.height = 2 * R + 'px';
+    ring.style.borderRadius = kind === 'shape' ? '50%' : '0';
+    ring.style.transform = `translate(-50%, -50%) ${kind === 'diamond' ? 'rotate(45deg) scale(0.71)' : ''}`;
+  }
+}
+function resetLayer(el) {
+  el.style.transform = ''; el.style.opacity = ''; el.style.filter = ''; el.style.clipPath = ''; el.style.transformOrigin = '';
+}
+
+window.seek = function (t) {
+  window.__t = t;
+  const S = window.__scenes;
+  if (window.__bg) window.__bg(t);
+  $('flash').style.opacity = 0; $('ring').style.opacity = 0;
+  let i = S.length - 1;
+  for (let k = 0; k < S.length; k++) if (t < S[k].t0 + S[k].d) { i = k; break; }
+  const cur = S[i], lt = t - cur.t0;
+  const tr = cur.tr, td = cur.td;
+  const inTrans = i > 0 && tr !== 'cut' && lt < td;
+  for (let k = 0; k < S.length; k++) {
+    const on = k === i || (inTrans && k === i - 1);
+    S[k].el.style.display = on ? 'block' : 'none';
+    if (on) resetLayer(S[k].el);
+  }
+  if (inTrans) {
+    const pv = S[i - 1];
+    pv.fn(t - pv.t0, pv.d);
+    cur.fn(lt, cur.d);
+    trans(tr, clamp(lt / td), pv.el, cur.el);
+    pv.el.style.zIndex = 1; cur.el.style.zIndex = 2;
+  } else {
+    cur.el.style.zIndex = 2;
+    cur.fn(lt, cur.d);
+  }
+  const cl = $('cornerlogo');
+  if (cl) cl.style.opacity = cur.corner ? clamp(lt / 0.5) * 0.92 : 0;
+  return i;
+};
+
+// shrink any .fit text that overflows its box (runs once, after fonts load)
+window.__fit = function () {
+  document.querySelectorAll('.fit').forEach(el => {
+    const max = parseFloat(el.dataset.maxw || el.clientWidth);
+    let fs = parseFloat(getComputedStyle(el).fontSize), n = 0;
+    while (el.scrollWidth > max + 1 && n++ < 40) { fs *= 0.95; el.style.fontSize = fs + 'px'; }
+  });
+};
+// layout check: text elements that leave the frame or the safe area at a given time
+window.__layout = function (t, top, bot) {
+  window.seek(t);
+  const out = [];
+  document.querySelectorAll('.txt').forEach(el => {
+    const sc = el.closest('.scene');
+    if (!sc || sc.style.display === 'none' || parseFloat(getComputedStyle(el).opacity) < 0.5) return;
+    const r = el.getBoundingClientRect();
+    if (r.width < 2) return;
+    if (r.left < -2 || r.right > window.__W + 2) out.push(['error', el.textContent.trim().slice(0, 40), 'leaves the frame']);
+    else if (r.top < top - 4 || r.bottom > bot + 4) out.push(['warn', el.textContent.trim().slice(0, 40), 'outside the safe area']);
+  });
+  return out;
+};
+"""
+
+BASE_CSS = r"""
+html, body { margin: 0; width: __W__px; height: __H__px; overflow: hidden; background: var(--bg); }
+#stage { position: absolute; inset: 0; overflow: hidden; direction: rtl; color: var(--text); font-family: var(--f-body); }
+#bgl { position: absolute; inset: 0; }
+.bgbase { position: absolute; inset: 0; background: var(--bggrad); }
+.glow { position: absolute; border-radius: 50%; will-change: transform; }
+.grain { position: absolute; inset: 0; background-image: url(__GRAIN__); opacity: var(--grain); pointer-events: none; }
+.vig { position: absolute; inset: 0; background: radial-gradient(ellipse 78% 66% at 50% 48%, transparent 52%, var(--vig) 100%); }
+#scenes { position: absolute; inset: 0; perspective: calc(2200px * var(--u)); }
+.scene { position: absolute; inset: 0; display: none; backface-visibility: hidden; }
+.space { position: absolute; inset: 0; perspective: calc(2200px * var(--u)); perspective-origin: 50% 45%; }
+.w { display: inline-block; will-change: transform, opacity, filter; transform-origin: 50% 100%; }
+.hl { color: var(--primary); }
+.persp { perspective: calc(900px * var(--u)); }
+#flash { position: absolute; inset: 0; background: #fff; opacity: 0; z-index: 50; pointer-events: none; }
+#ring { position: absolute; left: 50%; top: 50%; width: 10px; height: 10px; border: calc(10px * var(--u)) solid var(--primary);
+  box-shadow: 0 0 calc(40px * var(--u)) var(--primary); opacity: 0; z-index: 40; pointer-events: none; box-sizing: border-box; }
+#cornerlogo { position: absolute; left: calc(64px * var(--u)); top: calc(var(--top) - 120px * var(--u)); height: calc(84px * var(--u));
+  z-index: 30; opacity: 0; }
+.grad .w, .grad:not(:has(.w)) { background: linear-gradient(180deg, var(--hi) 0%, var(--primary) 45%, var(--primary2) 100%);
+  -webkit-background-clip: text; background-clip: text; color: transparent; }
+.sheen { position: absolute; top: -20%; bottom: -20%; width: 34%; left: 33%; opacity: 0; pointer-events: none;
+  background: linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,.38), rgba(255,255,255,0)); }
+"""
+
+
+def grain_png(P):
+    rng = np.random.default_rng(11)
+    n = (rng.random((256, 256)) * 255).astype(np.uint8)
+    im = Image.fromarray(n, "L").convert("RGBA")
+    im.putalpha(Image.fromarray((rng.random((256, 256)) * 120).astype(np.uint8), "L"))
+    return P.asset(im, "grain")
+
+
+def fonts_css(ctx):
+    out = []
+    for role in ("display", "heavy", "body", "mono", "stamp"):
+        name, wt = ctx.ts.get(role, ctx.ts["heavy"])
+        fp = pe.font_path(name)
+        out.append(f'@font-face {{ font-family: "R-{role}"; src: url("file://{os.path.abspath(fp)}"); font-weight: 100 900; }}')
+        out.append(f".f-{role} {{ font-family: 'R-{role}', sans-serif; font-weight: {wt or 700}; }}")
+    return "\n".join(out)
+
+
+def root_css(P):
+    c, ctx = P.c, P.ctx
+    bg = c["bg"]
+    light = ctx.light
+    lift = tuple(min(255, int(v + (40 if not light else 10))) for v in bg)
+    deep = tuple(max(0, int(v * (0.45 if not light else 0.92))) for v in bg)
+    v = {"--u": f"{P.U:.4f}", "--W": f"{P.W}px", "--H": f"{P.H}px", "--top": f"{P.top}px", "--bot": f"{P.bot}px",
+         "--bg": hexc(bg), "--primary": hexc(c["primary"]), "--primary2": hexc(c["primary2"]), "--hi": hexc(c["hi"]),
+         "--accent": hexc(c["accent"]), "--text": hexc(c["text"]), "--muted": hexc(c.get("muted", c["text"])),
+         "--cta": hexc(c["cta"]), "--ink": "#141018" if not light else "#141018",
+         "--bggrad": f"radial-gradient(120% 75% at 50% 14%, {hexc(lift)} 0%, {hexc(bg)} 52%, {hexc(deep)} 100%)",
+         "--grain": "0.07" if not light else "0.05", "--vig": "rgba(0,0,0,.55)" if not light else "rgba(0,0,0,.12)",
+         "--f-body": "'R-body', sans-serif"}
+    return ":root { " + "; ".join(f"{k}: {val}" for k, val in v.items()) + "; }"
+
+
+def bg_layer(P):
+    """Shared animated background: soft colour glows drifting over the brand gradient (no CSS blur: cheap to render)."""
+    c, W, H = P.c, P.W, P.H
+    glows = [("g1", c["primary"], 0.30, -0.35 * W, 0.12 * H, 1.0 * W), ("g2", c["primary2"], 0.34, 0.45 * W, 0.52 * H, 0.95 * W),
+             ("g3", c["accent"], 0.16, 0.1 * W, -0.25 * H, 0.8 * W)]
+    h = ['<div id="bgl"><div class="bgbase"></div>']
+    for gid, col, a, x, y, s in glows:
+        h.append(f'<div class="glow" id="{gid}" style="left:{x:.0f}px;top:{y:.0f}px;width:{s:.0f}px;height:{s:.0f}px;'
+                 f'background:radial-gradient(closest-side, {rgba(col, a)}, {rgba(col, a * 0.45)} 45%, {rgba(col, 0)} 100%)"></div>')
+    h.append('</div>')
+    js = (f"window.__bg = t => {{ $('g1').style.transform = `translate(${{{90 * P.U}*Math.sin(t*.31)}}px, ${{{70 * P.U}*Math.cos(t*.27)}}px)`;"
+          f" $('g2').style.transform = `translate(${{{-80 * P.U}*Math.sin(t*.29+1)}}px, ${{{-60 * P.U}*Math.cos(t*.33)}}px)`;"
+          f" $('g3').style.transform = `translate(${{{60 * P.U}*Math.cos(t*.23)}}px, ${{{40 * P.U}*Math.sin(t*.37)}}px)`; }};")
+    return "".join(h), js
+
+
+# ----------------------------------------------------------------- scenes
+ICON_X = ('<svg viewBox="0 0 24 24" class="ic"><circle cx="12" cy="12" r="10.5" fill="none" stroke="currentColor" stroke-width="1.8"/>'
+          '<path d="M8 8l8 8M16 8l-8 8" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>')
+ICON_OK = ('<svg viewBox="0 0 24 24" class="ic"><circle cx="12" cy="12" r="10.5" fill="currentColor" opacity=".18"/>'
+           '<circle cx="12" cy="12" r="10.5" fill="none" stroke="currentColor" stroke-width="1.8"/>'
+           '<path d="M7 12.5l3.2 3.2L17.2 8.6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>')
+ICON_SEND = '<svg viewBox="0 0 24 24"><path d="M4 12l15-7-5 15-2.5-6.2z" fill="currentColor"/></svg>'
+ICON_CHAT = ('<svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 0 0-7.8 13.5L3 21l4.6-1.2A9 9 0 1 0 12 3z" fill="none" stroke="currentColor" '
+             'stroke-width="2"/><path d="M8.5 9.5c.3 2.6 2.5 4.8 5.1 5.3l1.2-1.3 1.8.8-.4 1.8c-4.2.3-8.3-3.8-8-8l1.8-.4.8 1.8z" fill="currentColor"/></svg>')
+ICONS = {"calendar": '<svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15" rx="3" fill="none" stroke="currentColor" stroke-width="2"/>'
+                     '<path d="M3.5 10h17M8 3v4M16 3v4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+         "cart": '<svg viewBox="0 0 24 24"><path d="M3 4h2.5l2.2 10.5h10l2-7.5H7" fill="none" stroke="currentColor" stroke-width="2" '
+                 'stroke-linejoin="round"/><circle cx="9.5" cy="19" r="1.6" fill="currentColor"/><circle cx="16.5" cy="19" r="1.6" fill="currentColor"/></svg>',
+         "chart": '<svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M21 20H3" stroke="currentColor" stroke-width="2.2" '
+                  'stroke-linecap="round"/></svg>',
+         "people": '<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5" fill="none" stroke="currentColor" stroke-width="2"/>'
+                   '<path d="M2.5 20c.8-3.8 3.4-5.5 6.5-5.5s5.7 1.7 6.5 5.5M16 4.8a3.4 3.4 0 0 1 0 6.4M18 14.8c2 .8 3.2 2.5 3.6 5" '
+                   'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+         "web": '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/>'
+                '<path d="M3 12h18M12 3c3 3.3 3 14.7 0 18M12 3c-3 3.3-3 14.7 0 18" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>'}
+
+SCENE_CSS = r"""
+.ic { width: 1em; height: 1em; flex: none; }
+.ctag { position: relative; display: inline-flex; align-items: center; gap: .32em; padding: .26em .62em .3em; border-radius: .34em;
+  font-family: 'R-heavy'; font-weight: 800; line-height: 1; white-space: nowrap; will-change: transform, opacity; }
+.ctag.x { color: color-mix(in srgb, var(--primary2) 45%, #fff); border: calc(3px*var(--u)) solid var(--primary2);
+  background: color-mix(in srgb, var(--primary2) 16%, transparent); box-shadow: 0 0 calc(34px*var(--u)) color-mix(in srgb, var(--primary2) 45%, transparent), inset 0 0 calc(24px*var(--u)) color-mix(in srgb, var(--primary2) 22%, transparent); }
+.ctag.ok { color: color-mix(in srgb, var(--primary) 30%, #fff); border: calc(3.5px*var(--u)) solid var(--primary);
+  background: color-mix(in srgb, var(--primary) 18%, transparent); }
+.ctag .strike { position: absolute; right: .55em; left: .55em; top: 52%; height: calc(5px*var(--u)); border-radius: 3px;
+  background: currentColor; transform: scaleX(0); transform-origin: 100% 50%; }
+.pbar { position: absolute; left: 8%; width: 84%; height: calc(104px*var(--u)); border-radius: calc(52px*var(--u)); background: #fbfbfd;
+  box-shadow: 0 calc(24px*var(--u)) calc(60px*var(--u)) rgba(0,0,0,.45); display: flex; align-items: center; direction: rtl;
+  padding: 0 calc(40px*var(--u)) 0 calc(18px*var(--u)); box-sizing: border-box; gap: calc(14px*var(--u)); }
+.pbar .ptxt { flex: 1; font-family: 'R-heavy'; font-weight: 700; font-size: calc(42px*var(--u)); color: #1d1a29; white-space: nowrap; overflow: hidden; }
+.pbar .caret { display: inline-block; width: calc(4px*var(--u)); height: calc(48px*var(--u)); background: var(--primary); vertical-align: middle; margin-right: 2px; }
+.pbar .send { width: calc(72px*var(--u)); height: calc(72px*var(--u)); border-radius: 50%; background: var(--primary); color: #0b0d14; display: grid; place-items: center; flex: none; }
+.pbar .send svg { width: 46%; height: 46%; transform: scaleX(-1); }
+.cap { position: absolute; left: 6%; right: 6%; text-align: center; font-family: 'R-heavy'; font-weight: 800; line-height: 1.12; text-wrap: balance;
+  text-shadow: 0 calc(4px*var(--u)) calc(24px*var(--u)) rgba(0,0,0,.45); }
+
+.dev { position: absolute; transform-style: preserve-3d; will-change: transform; }
+.phone { position: absolute; inset: 0; transform-style: preserve-3d;
+  background: linear-gradient(150deg, #5d6475 0%, #242833 22%, #0b0d12 56%, #2b303b 100%);
+  box-shadow: inset 0 0 0 calc(2px*var(--u)) rgba(255,255,255,.18), inset 0 0 0 calc(9px*var(--u)) #06070b,
+    0 calc(70px*var(--u)) calc(130px*var(--u)) rgba(0,0,0,.6); }
+.pbtn { position: absolute; width: calc(6px*var(--u)); border-radius: 3px; background: linear-gradient(90deg, #4c5260, #1a1d24); }
+.screen { position: absolute; overflow: hidden; background: #000; }
+.screen .item { position: absolute; inset: 0; overflow: hidden; will-change: transform; }
+.screen img { position: absolute; display: block; max-width: none; }
+.island { position: absolute; left: 50%; transform: translateX(-50%); background: #000; z-index: 3; }
+.glare { position: absolute; inset: 0; z-index: 4; pointer-events: none;
+  background: linear-gradient(118deg, rgba(255,255,255,.15) 0%, rgba(255,255,255,.04) 28%, rgba(255,255,255,0) 42%); }
+.lid { position: absolute; transform-style: preserve-3d; background: linear-gradient(160deg, #3c4250, #14171d 60%, #262a33);
+  box-shadow: inset 0 0 0 calc(2px*var(--u)) rgba(255,255,255,.14), 0 calc(60px*var(--u)) calc(110px*var(--u)) rgba(0,0,0,.55); }
+.deck { position: absolute; background: linear-gradient(180deg, #8a909e 0%, #4a4f5b 35%, #23262d 100%);
+  clip-path: polygon(4% 0, 96% 0, 100% 100%, 0 100%); }
+.slot { position: absolute; background: #04050a; opacity: 0; z-index: 2; }
+.pop { position: absolute; overflow: hidden; will-change: transform; opacity: 0; z-index: 5; }
+.pop img { width: 100%; height: 100%; display: block; }
+.kick { position: absolute; display: flex; align-items: center; gap: calc(18px*var(--u)); font-family: 'R-body'; font-weight: 600;
+  letter-spacing: .16em; color: color-mix(in srgb, var(--text) 62%, transparent); white-space: nowrap; }
+.kick i { display: block; width: calc(64px*var(--u)); height: calc(2px*var(--u)); background: linear-gradient(90deg, transparent, var(--primary)); }
+.ctr { position: absolute; display: flex; align-items: flex-end; gap: calc(10px*var(--u)); direction: ltr; }
+.digits { position: relative; overflow: hidden; }
+.digits .col { position: absolute; left: 0; top: 0; font-family: 'R-display'; font-weight: 900; letter-spacing: -.03em; will-change: transform;
+  background: linear-gradient(180deg, var(--hi) 0%, var(--primary) 45%, var(--primary2) 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.ctr .tot { font-family: 'R-heavy'; font-weight: 600; color: color-mix(in srgb, var(--text) 45%, transparent); }
+.glab { position: absolute; font-family: 'R-display'; font-weight: 800; line-height: 1.06; text-wrap: balance; }
+.gtag { position: absolute; display: flex; align-items: center; gap: calc(14px*var(--u)); padding: calc(16px*var(--u)) calc(30px*var(--u));
+  border-radius: calc(40px*var(--u)); background: rgba(16,19,30,.86); box-shadow: inset 0 0 0 1px rgba(255,255,255,.16), 0 calc(20px*var(--u)) calc(40px*var(--u)) rgba(0,0,0,.45);
+  font-family: 'R-heavy'; font-weight: 700; font-size: calc(32px*var(--u)); white-space: nowrap; color: #fff; z-index: 6; }
+.gtag svg { width: calc(30px*var(--u)); height: calc(30px*var(--u)); color: var(--primary); }
+.floor { position: absolute; border-radius: 50%; background: radial-gradient(closest-side, rgba(0,0,0,.72), rgba(0,0,0,0)); }
+
+.plane { position: absolute; transform-style: preserve-3d; display: grid; }
+.tile { position: relative; overflow: hidden; }
+.tile img { width: 100%; height: 100%; object-fit: cover; object-position: 50% 0; display: block; }
+.tile::after { content: ''; position: absolute; inset: 0; background: rgba(0,0,0,var(--dim)); }
+.scrim { position: absolute; left: 0; right: 0; top: 0; background: linear-gradient(180deg, var(--bg) 0%, color-mix(in srgb, var(--bg) 70%, transparent) 55%, transparent 100%); }
+.qcard { position: absolute; left: 7%; right: 7%; padding: calc(34px*var(--u)) calc(40px*var(--u)); border-radius: calc(30px*var(--u));
+  background: rgba(22,17,42,.94); box-shadow: inset 0 0 0 calc(2px*var(--u)) color-mix(in srgb, var(--primary2) 55%, transparent), 0 calc(30px*var(--u)) calc(70px*var(--u)) rgba(0,0,0,.55);
+  opacity: 0; text-align: right; }
+
+.bcol { position: absolute; left: 7%; right: 7%; display: flex; flex-direction: column; align-items: center; transform-style: preserve-3d; }
+.bcard { position: relative; width: 100%; box-sizing: border-box; display: flex; align-items: center; gap: calc(26px*var(--u));
+  padding: calc(36px*var(--u)) calc(40px*var(--u)); border-radius: calc(34px*var(--u)); background: #fbf6ec; color: #1a1430; overflow: hidden;
+  box-shadow: 0 calc(34px*var(--u)) calc(80px*var(--u)) rgba(0,0,0,.5), inset 0 0 0 calc(2px*var(--u)) #fff; will-change: transform; }
+.bcard .btxt { flex: 1; text-align: right; }
+.bcard .bt { font-family: 'R-display'; font-weight: 900; line-height: 1.05; }
+.bcard .bd { font-family: 'R-body'; font-weight: 500; color: #4e4762; font-size: calc(34px*var(--u)); margin-top: calc(10px*var(--u)); line-height: 1.3; }
+.bcard .tags { display: flex; flex-wrap: wrap; gap: calc(10px*var(--u)); margin-top: calc(18px*var(--u)); }
+.bcard .tags span { padding: calc(9px*var(--u)) calc(18px*var(--u)); border-radius: calc(20px*var(--u)); background: #1c1630; color: #fff;
+  font-family: 'R-heavy'; font-weight: 700; font-size: calc(24px*var(--u)); direction: ltr; }
+.bcard .thumb { width: 30%; aspect-ratio: 1 / 1.05; border-radius: calc(22px*var(--u)); overflow: hidden; flex: none; transform: rotate(-5deg);
+  box-shadow: 0 calc(16px*var(--u)) calc(36px*var(--u)) rgba(0,0,0,.35); }
+.bcard .thumb img { width: 100%; height: 100%; object-fit: cover; object-position: 50% 0; }
+.plus { width: calc(76px*var(--u)); height: calc(76px*var(--u)); border-radius: 50%; background: var(--primary); color: #0b0d14; display: grid; place-items: center;
+  font: 900 calc(54px*var(--u))/1 'R-heavy'; box-shadow: 0 0 calc(36px*var(--u)) var(--primary); margin: calc(-12px*var(--u)) 0; z-index: 3; position: relative; }
+
+.ccol { position: absolute; left: 6%; right: 6%; display: flex; flex-direction: column; align-items: center; text-align: center; }
+.cbtn { position: relative; display: inline-flex; align-items: center; gap: calc(18px*var(--u)); padding: calc(28px*var(--u)) calc(54px*var(--u));
+  border-radius: calc(60px*var(--u)); font-family: 'R-heavy'; font-weight: 800; font-size: calc(44px*var(--u)); overflow: hidden; white-space: nowrap;
+  box-shadow: 0 calc(24px*var(--u)) calc(60px*var(--u)) rgba(0,0,0,.45); }
+.cbtn svg { width: calc(48px*var(--u)); height: calc(48px*var(--u)); }
+.ripple { position: absolute; border-radius: 50%; border: calc(4px*var(--u)) solid #fff; opacity: 0; pointer-events: none; }
+.logoimg { display: block; object-fit: contain; }
+.lring { position: absolute; border-radius: 50%; border: calc(3px*var(--u)) solid var(--primary); opacity: 0; }
+.num { font-family: 'R-display'; font-weight: 900; line-height: 1; direction: ltr; }
+.rule { display: flex; align-items: center; gap: calc(16px*var(--u)); color: color-mix(in srgb, var(--text) 55%, transparent);
+  font-family: 'R-mono'; font-size: calc(22px*var(--u)); letter-spacing: .3em; }
+.rule i { display: block; height: 1px; width: calc(120px*var(--u)); background: currentColor; opacity: .7; }
+"""
+
+
+def _sid(i, name):
+    return f"s{i}_{name}"
+
+
+def w_kinetic(sc, P, i):
+    W, U = P.W, P.U
+    size0 = float(sc.get("size", 150))
+    rows, ids = [], []
+    for j, ln in enumerate(sc.get("lines", [])):
+        d = {"text": ln} if isinstance(ln, str) else dict(ln)
+        st = d.get("style", "")
+        sz = float(d.get("size", size0 * (0.55 if st == "small" else 1)))
+        cls = "grad" if st in ("accent", "grad") else ""
+        extra = ""
+        if st == "outline":
+            extra = f"color:transparent;-webkit-text-stroke:{3 * U:.1f}px var(--text);"
+        if st == "muted":
+            extra = "color:var(--muted);"
+        lid = _sid(i, f"l{j}")
+        ids.append(lid)
+        rows.append(f'<div id="{lid}" class="f-display fit txt persp {cls}" data-maxw="{W * 0.88:.0f}" '
+                    f'style="font-size:{sz * U:.1f}px;line-height:1.04;white-space:nowrap;{extra}">{words_html(d["text"])}</div>')
+    box = _sid(i, "k")
+    html = (f'<div id="{box}" style="position:absolute;left:0;right:0;top:{P.top}px;height:{P.bot - P.top}px;display:flex;'
+            f'flex-direction:column;justify-content:center;align-items:center;gap:{8 * U:.0f}px;text-align:center">{"".join(rows)}</div>')
+    st0, stag = float(sc.get("start", 0.06)), max(0.16, float(sc.get("stagger", 0.2)))
+    js = (f"(t, d) => {{ {json.dumps(ids)}.forEach((id, j) => reveal($(id), t, {st0} + j * {stag}, {{step: 0.07}}));"
+          f" $('{box}').style.transform = `scale(${{1 + 0.035 * cubicInOut(clamp(t / d))}})`; }}")
+    return {"html": html, "js": js, "sfx": [(st0 + 0.02, "whoosh", 0.3)]}
+
+
+def w_title(sc, P, i):
+    lines = []
+    if sc.get("small"):
+        lines.append({"text": sc["small"], "style": "muted", "size": float(sc.get("small_size", 64))})
+    if sc.get("big"):
+        lines.append({"text": sc["big"], "size": float(sc.get("size", 150))})
+    if sc.get("big2"):
+        lines.append({"text": sc["big2"], "style": "accent", "size": float(sc.get("size", 150))})
+    return w_kinetic(dict(sc, lines=lines), P, i)
+
+
+def w_contrast(sc, P, i):
+    W, U, c = P.W, P.U, P.c
+    items = [({"text": it} if isinstance(it, str) else it) for it in sc.get("items", [])]
+    per, st = float(sc.get("per", 0.55)), float(sc.get("start", 0.15))
+    band = P.bot - P.top
+    has_prompt = bool(sc.get("prompt"))
+    tags_cy = P.top + band * (0.27 if has_prompt else 0.42)
+    tags, t_check = [], None
+    for k, it in enumerate(items):
+        good = it.get("mark", "x") == "check"
+        sz = float(it.get("size", 90 if good else 76))
+        ti = st + per * k
+        if good and t_check is None:
+            t_check = ti
+        tags.append(f'<div id="{_sid(i, f"t{k}")}" class="ctag {"ok" if good else "x"}" style="font-size:{sz * U:.1f}px">'
+                    f'{ICON_OK if good else ICON_X}<span class="txt">{esc(it["text"])}</span>{"" if good else "<i class=strike></i>"}</div>')
+    t_check = t_check if t_check is not None else st + per * len(items)
+    html = [f'<div class="persp" style="position:absolute;left:0;right:0;top:{tags_cy:.0f}px;transform:translateY(-50%);display:flex;'
+            f'flex-direction:column;align-items:center;gap:{20 * U:.0f}px">{"".join(tags)}</div>']
+    sfx = [(st + per * k + 0.02, "thump" if it.get("mark", "x") == "check" else "pop", 0.6 if it.get("mark", "x") == "check" else 0.45)
+           for k, it in enumerate(items)]
+    js = [f"const T = {json.dumps([st + per * k for k in range(len(items))])}, G = {json.dumps([it.get('mark', 'x') == 'check' for it in items])};",
+          f"T.forEach((ti, k) => {{ const el = $('{_sid(i, 't')}' + k); const p = prog(t, ti, 0.6), e = expoOut(p);",
+          " let a = clamp(p * 2.2), s = lerp(0.88, 1, e);",
+          f" if (!G[k]) {{ const q = cubicInOut(prog(t, {t_check} + 0.12, 0.45)); el.querySelector('.strike').style.transform = `scaleX(${{q}})`; a *= 1 - 0.5 * q; s *= 1 - 0.04 * q; }}",
+          " else { const g = Math.exp(-Math.max(0, t - ti - 0.35) / 0.6) * (t > ti ? 1 : 0);",
+          "   el.style.boxShadow = `0 0 ${(40 + 50 * g) * U}px color-mix(in srgb, var(--primary) ${45 + 30 * g}%, transparent), inset 0 0 ${26 * U}px color-mix(in srgb, var(--primary) 25%, transparent)`; }",
+          " el.style.opacity = a; el.style.transform = `translateY(${(1 - e) * 46 * U}px) rotateX(${-(1 - e) * 70}deg) scale(${s})`;",
+          " el.style.filter = p < 1 ? `blur(${(1 - cubicOut(p)) * 10 * U}px)` : 'none'; });"]
+    if has_prompt:
+        pa, cps = float(sc.get("prompt_at", st + 0.2)), float(sc.get("cps", 14))
+        text = sc["prompt"]
+        pid = _sid(i, "pb")
+        html.append(f'<div id="{pid}" class="pbar" style="top:{P.top + band * 0.66 - 52 * U:.0f}px"><div class="ptxt">'
+                    f'<span id="{_sid(i, "pt")}"></span><span class="caret" id="{_sid(i, "pc")}"></span></div>'
+                    f'<div class="send">{ICON_SEND}</div></div>')
+        js.append(f"enter($('{pid}'), t, {pa}, {{y: 70, s: 0.94}}); const done = typeText($('{_sid(i, 'pt')}'), {json.dumps(text)}, t, {pa + 0.3}, {cps});"
+                  f" $('{_sid(i, 'pc')}').style.opacity = (!done || Math.floor(t * 2.2) % 2 === 0) ? 1 : 0;")
+        sfx += [(pa + 0.3 + k / cps, "type", 0.35) for k in range(0, len(text), 2) if text[k].strip()]
+    hl = sc.get("highlight", ())
+    caps = [(sc.get("caption"), 0.2, t_check if sc.get("caption2") else None), (sc.get("caption2"), t_check + 0.05, None)]
+    for k, (txt, tin, tout) in enumerate(caps):
+        if not txt:
+            continue
+        cid = _sid(i, f"c{k}")
+        html.append(f'<div id="{cid}" class="cap txt persp" style="bottom:{P.H - P.bot + 10 * U:.0f}px;'
+                    f'font-size:{float(sc.get("caption_size", 46)) * U:.1f}px">{words_html(txt, hl=hl)}</div>')
+        js.append(f"reveal($('{cid}'), t, {tin}, {{step: 0.06{', out: ' + str(tout) if tout is not None else ''}}});")
+    return {"html": "".join(html), "js": "(t, d) => { " + "\n".join(js) + " }", "sfx": [(0.0, "whoosh", 0.25)] + sfx}
+
+
+def _cover_map(iw, ih, sw, sh, fx, fy):
+    k = max(sw / iw, sh / ih)
+    dw, dh = iw * k, ih * k
+    return k, (sw - dw) * fx, (sh - dh) * fy, dw, dh
+
+
+def w_gallery(sc, P, i):
+    W, H, U, c = P.W, P.H, P.U, P.c
+    items = [({"src": it} if isinstance(it, str) else dict(it)) for it in sc.get("items", [])]
+    n = max(1, len(items))
+    per, t_in = float(sc.get("per", 0.7)), 0.45
+    kind = sc.get("device", "phone")
+    band = P.bot - P.top
+    head_h = 215 * U if kind == "phone" else 190 * U
+    starts = [0.0] + [t_in + k * per for k in range(1, n)]
+    dur = sc.get("_dur", t_in + per * n + 0.6)
+    ends = starts[1:] + [dur]
+    if kind == "phone":
+        ph_h = min(band - head_h + 110 * U, W * 0.52 * 2.1) * float(sc.get("device_scale", 1))
+        dw_, dh_ = ph_h / 2.1, ph_h
+        bez = dw_ * 16 / 560
+        sx, sy, sw, sh = bez, bez, dw_ - 2 * bez, dh_ - 2 * bez
+        dcx, dcy = W / 2, P.top + head_h + dh_ / 2
+        rad, srad = dw_ * 0.16, dw_ * 0.132
+        dev_inner = (f'<div class="phone" style="border-radius:{rad:.0f}px">'
+                     f'<div class="pbtn" style="left:-{4 * U:.0f}px;top:{dh_ * .2:.0f}px;height:{dh_ * .07:.0f}px"></div>'
+                     f'<div class="pbtn" style="left:-{4 * U:.0f}px;top:{dh_ * .3:.0f}px;height:{dh_ * .12:.0f}px"></div>'
+                     f'<div class="pbtn" style="right:-{4 * U:.0f}px;top:{dh_ * .26:.0f}px;height:{dh_ * .16:.0f}px"></div></div>')
+        island = f'<div class="island" style="top:{sh * 0.018:.0f}px;width:{sw * 0.28:.0f}px;height:{sw * 0.083:.0f}px;border-radius:{sw * 0.042:.0f}px"></div>'
+        fy_def = 0.0
+    else:
+        dw_ = W * 0.78 * float(sc.get("device_scale", 1))
+        lid_h = dw_ * 0.64
+        bez = dw_ * 0.03
+        sx, sy, sw, sh = bez, bez, dw_ - 2 * bez, lid_h - 2 * bez
+        dh_ = lid_h
+        # centre laptop + caption in the free band (a short laptop at the top leaves the bottom empty)
+        group = lid_h + dw_ * 0.035 + 70 * U + float(sc.get("label_size", 76)) * U * 1.4
+        free = max(0.0, band - head_h - group)
+        dcx, dcy = W / 2, P.top + head_h + free * 0.42 + lid_h / 2
+        rad, srad = dw_ * 0.03, dw_ * 0.012
+        dev_inner = f'<div class="lid" style="position:absolute;inset:0;border-radius:{rad:.0f}px"></div>'
+        island = ""
+        fy_def = 0.5
+    scr = [f'<div class="screen" style="left:{sx:.1f}px;top:{sy:.1f}px;width:{sw:.1f}px;height:{sh:.1f}px;border-radius:{srad:.0f}px">']
+    pops, js_items = [], []
+    for k, it in enumerate(items):
+        spec = pe.norm_clip(it["src"])
+        src = P.still(spec)
+        im = Image.open(src)
+        iw, ih = im.size
+        fx, fy = spec.get("focus", [0.5, fy_def])
+        tall = ih / iw > (sh / sw) * 1.15
+        if tall:
+            k_, ox, oy, dwi, dhi = sw / iw, 0.0, 0.0, sw, ih * sw / iw
+        else:
+            k_, ox, oy, dwi, dhi = _cover_map(iw, ih, sw, sh, fx, fy)
+        scroll = max(0.0, min(dhi - sh, sh * 0.7)) if tall else 0.0
+        scr.append(f'<div class="item" id="{_sid(i, f"i{k}")}"><img src="{P.src(src)}" style="left:{ox:.1f}px;top:{oy:.1f}px;'
+                   f'width:{dwi:.1f}px;height:{dhi:.1f}px" id="{_sid(i, f"im{k}")}"></div>')
+        pv = it.get("pop")
+        if pv is None and sc.get("pop") not in (None, False):
+            pv = True
+        pop = None
+        if pv:
+            pd = pv if isinstance(pv, dict) else {}
+            box = pd.get("box")
+            if not box:
+                arr = np.asarray(im.convert("RGB").resize((max(1, int(iw * 688 / max(iw, ih))), max(1, int(ih * 688 / max(iw, ih))))))
+                b = pe.pop_box(arr)
+                box = [b[0] / arr.shape[1], b[1] / arr.shape[0], b[2] / arr.shape[1], b[3] / arr.shape[0]]
+            bx0, by0, bx1, by1 = box
+            piece = im.convert("RGB").crop((int(bx0 * iw), int(by0 * ih), int(bx1 * iw), int(by1 * ih)))
+            purl = P.asset(piece, f"pop_{i}_{k}")
+            px0, py0 = ox + bx0 * dwi, oy + by0 * dhi
+            pw_, ph_ = (bx1 - bx0) * dwi, (by1 - by0) * dhi
+            rr = float(pd.get("radius", 0.04 * min(bx1 - bx0, by1 - by0))) * dwi
+            at = starts[k] + float(pd.get("at", 1.15 if k == 0 else 0.4))
+            back = ends[k] - 0.42 if k < n - 1 else 99
+            direction = 1 if (bx0 + bx1) / 2 >= 0.5 else -1
+            sc_ = float(pd.get("scale", 1.0))
+            pops.append(f'<div class="pop" id="{_sid(i, f"p{k}")}" style="left:{sx + px0:.1f}px;top:{sy + py0:.1f}px;width:{pw_:.1f}px;'
+                        f'height:{ph_:.1f}px;border-radius:{rr:.1f}px"><img src="{purl}"></div>')
+            scr.append(f'<div class="slot" id="{_sid(i, f"q{k}")}" style="left:{px0:.1f}px;top:{py0:.1f}px;width:{pw_:.1f}px;'
+                       f'height:{ph_:.1f}px;border-radius:{rr:.1f}px"></div>')
+            out_x = min(W * 0.16, (W - dw_) / 2 + pw_ * 0.25) if kind == "phone" else W * 0.05
+            pz, py_ = (340 * U if kind == "phone" else 260 * U), -50 * U
+            # keep the popped piece inside the frame: projected size/position under the scene perspective
+            f = 2200.0 / (2200.0 - pz / U)
+            m = 44 * U
+            S = sc_ + 0.05
+            if pw_ * S * f > W - 2 * m:
+                S = (W - 2 * m) / (pw_ * f)
+                sc_ = S - 0.05
+            half = pw_ * S * f / 2
+            cx0 = dcx - dw_ / 2 + sx + px0 + pw_ / 2
+            pc = W / 2 + (cx0 + direction * out_x - W / 2) * f
+            pc = min(max(pc, m + half), W - m - half)
+            dx = (pc - W / 2) / f - cx0 + W / 2
+            pop = {"at": at, "back": back, "x": dx, "z": pz,
+                   "y": py_, "ry": -direction * 14, "s": sc_, "dir": direction}
+        js_items.append({"s": starts[k], "e": ends[k], "scroll": scroll, "pop": pop})
+    scr.append(island + '<div class="glare"></div></div>')
+    deck = ""
+    if kind != "phone":
+        deck = (f'<div class="deck" style="left:-{dw_ * 0.06:.0f}px;right:-{dw_ * 0.06:.0f}px;top:{dh_ - 2:.0f}px;height:{dw_ * 0.035:.0f}px;'
+                f'border-radius:0 0 {dw_ * 0.02:.0f}px {dw_ * 0.02:.0f}px"></div>')
+    dev = (f'<div class="dev" id="{_sid(i, "dev")}" style="left:{dcx - dw_ / 2:.0f}px;top:{dcy - dh_ / 2:.0f}px;width:{dw_:.0f}px;height:{dh_:.0f}px">'
+           f'{dev_inner}{"".join(scr)}{deck}{"".join(pops)}</div>')
+    floor = (f'<div class="floor" id="{_sid(i, "fl")}" style="left:{dcx - dw_ * 0.6:.0f}px;width:{dw_ * 1.2:.0f}px;'
+             f'top:{dcy + dh_ / 2 - 20 * U:.0f}px;height:{dw_ * 0.2:.0f}px;filter:blur({16 * U:.0f}px)"></div>')
+    # header: kicker, counter, labels; tags at the device's bottom edge
+    hdr = []
+    if sc.get("kicker"):
+        hdr.append(f'<div class="kick txt" id="{_sid(i, "kk")}" style="right:{80 * U:.0f}px;top:{P.top + 10 * U:.0f}px;'
+                   f'font-size:{30 * U:.1f}px"><i></i><span>{esc(sc["kicker"])}</span></div>')
+    lh = 128 * U
+    col = "<br>".join(f"{k + 1:02d}" for k in range(n))
+    hdr.append(f'<div class="ctr" id="{_sid(i, "ct")}" style="left:{76 * U:.0f}px;top:{P.top - 4 * U:.0f}px">'
+               f'<div class="digits" style="width:{150 * U:.0f}px;height:{lh:.0f}px"><div class="col" id="{_sid(i, "cc")}" '
+               f'style="font-size:{122 * U:.1f}px;line-height:{lh:.0f}px">{col}</div></div>'
+               f'<div class="tot" style="font-size:{38 * U:.1f}px;padding-bottom:{20 * U:.0f}px">/ {n:02d}</div></div>')
+    lsize = float(sc.get("label_size", 70 if kind == "phone" else 76))
+    for k, it in enumerate(items):
+        if it.get("label"):
+            if kind == "phone":
+                pos = f"right:{80 * U:.0f}px;top:{P.top + 52 * U:.0f}px;width:{W * 0.56:.0f}px;text-align:right"
+            else:
+                pos = f"left:6%;right:6%;top:{dcy + dh_ / 2 + dw_ * 0.035 + 70 * U:.0f}px;text-align:center"
+            hdr.append(f'<div class="glab txt persp" id="{_sid(i, f"l{k}")}" style="{pos};font-size:{lsize * U:.1f}px">'
+                       f'{words_html(it["label"], hl=it.get("highlight", ()))}</div>')
+        if it.get("tag"):
+            ic = ICONS.get(it.get("icon", "web"), ICONS["web"])
+            ty = dcy + dh_ / 2 - 34 * U if kind == "phone" else dcy + dh_ / 2 - 30 * U
+            hdr.append(f'<div class="gtag txt" id="{_sid(i, f"g{k}")}" style="left:50%;top:{ty:.0f}px;opacity:0">{ic}'
+                       f'<span>{esc(it["tag"])}</span></div>')
+    html = f'<div class="space">{floor}{dev}</div>' + "".join(hdr)
+    base_ry = -9 if kind == "phone" else -5
+    js = f"""(t, d) => {{
+  const I = {json.dumps(js_items)}, n = {n};
+  const pe_ = expoOut(prog(t, 0, 1.1));
+  const ry = lerp({base_ry - 26}, {base_ry}, pe_) + 3.2 * Math.sin(t * 0.55), rx = lerp(30, {5 if kind == 'phone' else 8}, pe_) + 1.5 * Math.sin(t * 0.42 + 1);
+  const dv = $('{_sid(i, 'dev')}');
+  dv.style.transform = `translate3d(0, ${{lerp(520, 0, pe_) * U}}px, ${{lerp(-300, 0, pe_) * U}}px) rotateX(${{rx}}deg) rotateY(${{ry}}deg)`;
+  dv.style.opacity = clamp(t / 0.35);
+  const fl = $('{_sid(i, 'fl')}'); fl.style.opacity = 0.9 * pe_; fl.style.transform = `scaleX(${{0.7 + 0.3 * pe_}})`;
+  let cur = 0; for (let k = 0; k < n; k++) if (t >= I[k].s) cur = k;
+  for (let k = 0; k < n; k++) {{
+    const el = $('{_sid(i, 'i')}' + k), it = I[k];
+    const pin = k === 0 ? 1 : cubicInOut(prog(t, it.s, 0.55)), pout = k < n - 1 ? cubicInOut(prog(t, I[k + 1].s, 0.55)) : 0;
+    el.style.display = (k === 0 || t >= it.s - 0.01) && pout < 1 ? 'block' : 'none';
+    el.style.transform = `translateY(${{(1 - pin) * 100 - pout * 100}}%)`;
+    const im = $('{_sid(i, 'im')}' + k);
+    const sp = sineInOut(prog(t, it.s + 0.4, Math.max(0.5, it.e - it.s - 0.4)));
+    im.style.transform = it.scroll ? `translateY(${{-it.scroll * sp}}px)` : `scale(${{1 + 0.035 * sp}})`;
+    const lab = $('{_sid(i, 'l')}' + k); if (lab) reveal(lab, t, it.s + (k === 0 ? 0.45 : 0.2), {{step: 0.06, out: k < n - 1 ? it.e - 0.25 : undefined}});
+    const tg = $('{_sid(i, 'g')}' + k); if (tg) enter(tg, t, it.s + (k === 0 ? 0.6 : 0.3), {{y: 24, out: k < n - 1 ? it.e - 0.2 : undefined, base: 'translateX(-50%)'}});
+    const P_ = it.pop; if (P_) {{
+      const pp = $('{_sid(i, 'p')}' + k), sl = $('{_sid(i, 'q')}' + k);
+      const pu = backOut(prog(t, P_.at, 0.8), 0.85), pa = cubicOut(prog(t, P_.at, 0.55)), pb = cubicInOut(prog(t, P_.back, 0.4));
+      const e = pu * (1 - pb), ea = pa * (1 - pb);
+      pp.style.opacity = (t < P_.at || pb >= 1) ? 0 : 1;
+      pp.style.transform = `translate3d(${{P_.x * e}}px, ${{P_.y * e}}px, ${{P_.z * e}}px) rotateY(${{P_.ry * e}}deg) rotateX(${{6 * e}}deg) scale(${{1 + (P_.s - 1 + 0.05) * e}})`;
+      pp.style.boxShadow = `0 ${{(30 + 80 * ea) * U}}px ${{(50 + 100 * ea) * U}}px rgba(0,0,0,${{0.12 + 0.48 * ea}}), 0 0 0 1px rgba(255,255,255,${{0.1 * ea}})`;
+      sl.style.opacity = 0.55 * ea;
+    }}
+  }}
+  const cc = $('{_sid(i, 'cc')}');
+  let ci = 0; for (let k = 1; k < n; k++) ci += cubicInOut(prog(t, I[k].s - 0.05, 0.5));
+  cc.style.transform = `translateY(${{-ci * {lh:.2f}}}px)`;
+  enter($('{_sid(i, 'ct')}'), t, 0.2, {{y: 20}});
+  const kk = $('{_sid(i, 'kk')}'); if (kk) enter(kk, t, 0.12, {{y: 16}});
+}}"""
+    sfx = [(0.05, "whoosh", 0.45)] + [(starts[k], "click", 0.35) for k in range(1, n)]
+    sfx += [(p["at"], "whoosh", 0.25) for p in [x["pop"] for x in js_items] if p]
+    return {"html": html, "js": js, "sfx": sfx}
+
+
+def w_wall(sc, P, i):
+    W, H, U = P.W, P.H, P.U
+    srcs = [P.still(x) for x in sc.get("images", [])]
+    cols, rows = int(sc.get("cols", 6)), int(sc.get("rows", 5))
+    tw = W * float(sc.get("tile_w", 0.27))
+    th = tw * float(sc.get("tile_ratio", 1.9))
+    gap = 18 * U
+    pw, ph = cols * (tw + gap) + gap, rows * (th + gap) + gap
+    rng = np.random.default_rng(7)
+    order = []
+    while len(order) < cols * rows and srcs:
+        order += list(rng.permutation(len(srcs)))
+    tiles = "".join(f'<div class="tile" style="border-radius:{18 * U:.0f}px"><img src="{P.src(srcs[order[k]])}"></div>'
+                    for k in range(cols * rows if srcs else 0))
+    scale = max(W * 1.45 / pw, H * 1.4 / ph) * 0.62
+    plane = (f'<div class="plane" style="--dim:{1 - float(sc.get("wall_dim", 0.6)):.2f};left:{W / 2 - pw / 2:.0f}px;top:{H * 0.56 - ph / 2:.0f}px;'
+             f'width:{pw:.0f}px;height:{ph:.0f}px;grid-template-columns:repeat({cols},{tw:.1f}px);grid-auto-rows:{th:.1f}px;gap:{gap:.1f}px;'
+             f'padding:{gap:.1f}px;box-sizing:border-box" id="{_sid(i, "pl")}">{tiles}</div>')
+    html = [f'<div style="position:absolute;inset:0;perspective:{1800 * U:.0f}px;perspective-origin:50% 40%">{plane}</div>',
+            f'<div class="scrim" style="height:{P.top + 420 * U:.0f}px"></div>']
+    js = [f"const pl = $('{_sid(i, 'pl')}'), q = t / d;",
+          f"pl.style.transform = `translate(${{(q - 0.5) * {W * 0.1:.1f}}}px, ${{(0.5 - q) * {H * 0.16:.1f}}}px) rotateX({float(sc.get('wall_rx', 32))}deg) "
+          f"rotateY({float(sc.get('wall_ry', -14))}deg) rotateZ(-6deg) scale({scale:.4f})`; pl.style.opacity = clamp(t / 0.5);"]
+    y = P.top + 10 * U
+    if sc.get("title"):
+        hl = sc.get("title_highlight", "digits")
+        tid = _sid(i, "tt")
+        html.append(f'<div id="{tid}" class="f-display txt persp" style="position:absolute;left:6%;right:6%;top:{y:.0f}px;text-align:center;'
+                    f'font-size:{float(sc.get("title_size", 96)) * U:.1f}px;line-height:1.06;text-wrap:balance;'
+                    f'text-shadow:0 {6 * U:.0f}px {30 * U:.0f}px rgba(0,0,0,.6)">'
+                    f'{words_html(sc["title"], hl=(() if isinstance(hl, str) else hl), hl_digits=(hl == "digits"))}</div>')
+        js.append(f"reveal($('{tid}'), t, 0.15, {{step: 0.07}});")
+    if sc.get("sub"):
+        sid = _sid(i, "sb")
+        html.append(f'<div id="{sid}" class="txt" style="position:absolute;left:8%;right:8%;top:{y + float(sc.get("title_size", 96)) * U * 2.3:.0f}px;'
+                    f'text-align:center;font-family:\'R-heavy\';font-size:{44 * U:.1f}px;color:var(--muted)">{esc(sc["sub"])}</div>')
+        js.append(f"enter($('{sid}'), t, 0.5, {{y: 20}});")
+    quotes = [({"text": q} if isinstance(q, str) else q) for q in sc.get("quotes", [])]
+    t_q0, per_q = float(sc.get("quotes_at", 0.9)), float(sc.get("per_quote", 1.9))
+    qcy = P.cy + (P.bot - P.cy) * 0.2
+    for k, q in enumerate(quotes):
+        lab = q.get("label", sc.get("quote_label"))
+        qid = _sid(i, f"qq{k}")
+        html.append(f'<div class="qcard" id="{qid}" style="top:{qcy:.0f}px">'
+                    + (f'<div style="font-family:\'R-heavy\';font-size:{30 * U:.1f}px;color:var(--primary);margin-bottom:{10 * U:.0f}px">{esc(lab)}</div>' if lab else "")
+                    + f'<div class="txt" style="font-family:\'R-heavy\';font-size:{float(q.get("size", 48)) * U:.1f}px;line-height:1.25">'
+                      f'{words_html(q["text"], hl=q.get("highlight", ()))}</div>'
+                    + (f'<div style="font-family:\'R-body\';font-size:{32 * U:.1f}px;color:var(--muted);margin-top:{14 * U:.0f}px">— {esc(q["who"])}</div>' if q.get("who") else "")
+                    + '</div>')
+        last = k == len(quotes) - 1
+        js.append(f"(() => {{ const el = $('{qid}'), t0 = {t_q0 + k * per_q}; const p = prog(t, t0, 0.5), e = backOut(p, 0.9);"
+                  f" let a = clamp(p * 2); {'' if last else f'a *= 1 - cubicInOut(prog(t, t0 + {per_q} - 0.2, 0.2));'}"
+                  f" el.style.opacity = a; el.style.transform = `translateY(-50%) translateY(${{(1 - e) * 60 * U}}px) scale(${{lerp(0.9, 1, e)}})`; }})();")
+    sfx = [(0.05, "whoosh", 0.4)] + [(t_q0 + k * per_q + 0.02, "pop", 0.5) for k in range(len(quotes))]
+    return {"html": "".join(html), "js": "(t, d) => { " + "\n".join(js) + " }", "sfx": sfx}
+
+
+def w_bundle(sc, P, i):
+    W, U = P.W, P.U
+    items = [it for it in sc.get("items", []) if isinstance(it, dict)][:3]
+    parts, ids = [], []
+    if sc.get("title"):
+        tid = _sid(i, "bt")
+        parts.append(f'<div id="{tid}" class="f-display grad txt persp" style="font-size:{float(sc.get("title_size", 90)) * U:.1f}px;'
+                     f'line-height:1.05;margin-bottom:{26 * U:.0f}px;text-align:center">{words_html(sc["title"])}</div>')
+    for k, it in enumerate(items):
+        if k:
+            parts.append(f'<div class="plus" id="{_sid(i, f"pl{k}")}">+</div>')
+        thumb = ""
+        if it.get("image") and os.path.exists(it["image"]):
+            thumb = f'<div class="thumb"><img src="{P.src(P.still(it["image"]))}"></div>'
+        tags = "".join(f'<span>{esc(tg if isinstance(tg, str) else tg.get("text", ""))}</span>' for tg in it.get("tags", []))
+        cid = _sid(i, f"c{k}")
+        ids.append(cid)
+        parts.append(f'<div class="bcard" id="{cid}"><div class="btxt"><div class="bt txt" style="font-size:{float(it.get("size", 66)) * U:.1f}px">'
+                     f'{esc(it.get("title", ""))}</div>' + (f'<div class="bd">{esc(it["text"])}</div>' if it.get("text") else "")
+                     + (f'<div class="tags">{tags}</div>' if tags else "") + f'</div>{thumb}<div class="sheen" id="{cid}_sh"></div></div>')
+    html = (f'<div class="bcol persp" style="top:{P.cy:.0f}px;transform:translateY(-50%)">{"".join(parts)}</div>')
+    js = [f"reveal($('{_sid(i, 'bt')}'), t, 0.1, {{step: 0.07}});" if sc.get("title") else ""]
+    for k, cid in enumerate(ids):
+        t0 = 0.3 + 0.5 * k
+        side = 1 if k % 2 == 0 else -1
+        js.append(f"(() => {{ const el = $('{cid}'); const p = prog(t, {t0}, 0.8), e = expoOut(p); el.style.opacity = clamp(p * 2.4);"
+                  f" el.style.transform = `translateY(${{(1 - e) * 80 * U}}px) rotateY(${{(1 - e) * {side * 55}}}deg) rotateX(${{(1 - e) * 12}}deg)"
+                  f" scale(${{lerp(0.9, 1, e)}})`; sheen($('{cid}_sh'), t, {t0 + 0.75}, 0.9); }})();")
+        if k:
+            js.append(f"(() => {{ const el = $('{_sid(i, f'pl{k}')}'); const p = prog(t, {t0 - 0.15}, 0.45), e = backOut(p, 1.6);"
+                      f" el.style.opacity = clamp(p * 3); el.style.transform = `scale(${{e}}) rotate(${{(1 - e) * -90}}deg)`; }})();")
+    sfx = [(0.3 + 0.5 * k + 0.02, "whoosh", 0.35) for k in range(len(ids))] + [(0.3 + 0.5 * k - 0.13, "pop", 0.45) for k in range(1, len(ids))]
+    return {"html": html, "js": "(t, d) => { " + "\n".join(js) + " }", "sfx": sfx}
+
+
+def _logo_url(P):
+    lg = P.ctx.logo()
+    return P.asset(lg.convert("RGBA"), "logo"), lg.size
+
+
+def w_cta(sc, P, i):
+    W, U, br = P.W, P.U, P.ctx.brand
+    parts, js = [], []
+    lid = _sid(i, "lg")
+    if sc.get("logo", True):
+        url, (lw, lh) = _logo_url(P)
+        hgt = 170 * U
+        wid = min(W * 0.5, hgt * lw / max(1, lh))
+        parts.append(f'<div style="position:relative;width:{wid:.0f}px;height:{hgt:.0f}px;margin-bottom:{30 * U:.0f}px" id="{lid}">'
+                     f'<div class="lring" id="{lid}_r" style="left:50%;top:50%;width:{hgt * 1.3:.0f}px;height:{hgt * 1.3:.0f}px;'
+                     f'margin:-{hgt * 0.65:.0f}px 0 0 -{hgt * 0.65:.0f}px"></div>'
+                     f'<img class="logoimg" src="{url}" style="width:100%;height:100%;filter:drop-shadow(0 0 {24 * U:.0f}px '
+                     f'color-mix(in srgb, var(--primary) 50%, transparent))"></div>')
+        js.append(f"(() => {{ const el = $('{lid}'), p = prog(t, 0.05, 0.9), e = backOut(p, 1.1); el.style.opacity = clamp(p * 2.5);"
+                  f" el.style.transform = `scale(${{lerp(0.55, 1, e)}})`; const r = $('{lid}_r'), q = prog(t, 0.25, 1.1);"
+                  f" r.style.opacity = (1 - q) * (q > 0 ? 0.9 : 0); r.style.transform = `scale(${{lerp(0.6, 2.2, cubicOut(q))}})`; }})();")
+    if sc.get("eyebrow"):
+        eid = _sid(i, "ey")
+        parts.append(f'<div id="{eid}" class="txt persp" style="font-family:\'R-heavy\';font-weight:700;font-size:{float(sc.get("eyebrow_size", 46)) * U:.1f}px;'
+                     f'color:var(--muted);margin-bottom:{14 * U:.0f}px">{words_html(sc["eyebrow"])}</div>')
+        js.append(f"reveal($('{eid}'), t, 0.3, {{step: 0.06}});")
+    hid = _sid(i, "hd")
+    parts.append(f'<div id="{hid}" class="f-display txt persp" style="font-size:{float(sc.get("headline_size", 92)) * U:.1f}px;line-height:1.05;'
+                 f'text-wrap:balance;margin-bottom:{44 * U:.0f}px;text-shadow:0 {6 * U:.0f}px {30 * U:.0f}px rgba(0,0,0,.4)">'
+                 f'{words_html(sc.get("headline", "לפרטים נוספים"))}</div>')
+    js.append(f"reveal($('{hid}'), t, 0.45, {{step: 0.08}});")
+    tap = float(sc.get("tap_at", 1.7))
+    if sc.get("button", True):
+        col = P.c["primary"] if sc.get("button_style") == "primary" else P.c["cta"]
+        ink = "#0b0d14" if sum(col) > 380 else "#ffffff"
+        icon = ICON_CHAT if sc.get("button_icon", True) else ""
+        bid = _sid(i, "bn")
+        parts.append(f'<div class="cbtn" id="{bid}" style="background:{hexc(col)};color:{ink}">{icon}<span class="txt">'
+                     f'{esc(sc.get("button", "שלחו הודעה בוואטסאפ"))}</span><div class="sheen" id="{bid}_sh"></div>'
+                     f'<div class="ripple" id="{bid}_rp" style="left:50%;top:50%;width:{160 * U:.0f}px;height:{160 * U:.0f}px;margin:-{80 * U:.0f}px"></div></div>')
+        js.append(f"(() => {{ const el = $('{bid}'), p = prog(t, 0.9, 0.7), e = backOut(p, 1.3); const tp = prog(t, {tap}, 0.5);"
+                  f" const press = 1 - 0.06 * Math.sin(Math.PI * clamp(tp * 2)); el.style.opacity = clamp(p * 3);"
+                  f" el.style.transform = `scale(${{lerp(0.7, 1, e) * press}})`; sheen($('{bid}_sh'), t, 1.35, 0.9); sheen($('{bid}_sh'), t, ({tap} + 1.6 < d - 0.6) ? {tap} + 1.6 : 99, 0.9);"
+                  f" if (t > 1.35 + 0.9 && t < {tap} + 1.6) $('{bid}_sh').style.opacity = 0;"
+                  f" const rp = $('{bid}_rp'); rp.style.opacity = tp > 0 && tp < 1 ? 1 - tp : 0; rp.style.transform = `scale(${{lerp(0.3, 4, cubicOut(tp))}})`; }})();")
+    phone = sc.get("phone", br.get("phone", ""))
+    if phone:
+        pid = _sid(i, "ph")
+        parts.append(f'<div id="{pid}" class="txt" style="font-family:\'R-heavy\';font-weight:800;font-size:{70 * U:.1f}px;margin-top:{38 * U:.0f}px;'
+                     f'direction:ltr;letter-spacing:.02em">{esc(phone)}</div>')
+        js.append(f"enter($('{pid}'), t, 1.1, {{y: 24}});")
+    site = sc.get("website", br.get("website"))
+    if site:
+        wid_ = _sid(i, "ws")
+        parts.append(f'<div id="{wid_}" class="txt" style="font-family:\'R-body\';font-size:{32 * U:.1f}px;color:var(--muted);margin-top:{12 * U:.0f}px;'
+                     f'direction:ltr">{esc(site)}</div>')
+        js.append(f"enter($('{wid_}'), t, 1.25, {{y: 18}});")
+    box = _sid(i, "cb")
+    html = f'<div class="ccol persp" id="{box}" style="top:{P.cy:.0f}px">{"".join(parts)}</div>'
+    js.append(f"$('{box}').style.transform = `translateY(-50%) scale(${{1 + 0.025 * sineInOut(clamp(t / d))}})`;")
+    sfx = [(0.05, "reveal", 0.7), (0.9, "pop", 0.4), (tap, "click", 0.6)]
+    return {"html": html, "js": "(t, d) => { " + "\n".join(js) + " }", "sfx": sfx, "corner": False}
+
+
+def w_logo(sc, P, i):
+    U, br = P.U, P.ctx.brand
+    url, (lw, lh) = _logo_url(P)
+    hgt = 300 * U
+    wid = min(P.W * 0.7, hgt * lw / max(1, lh))
+    lid = _sid(i, "lg")
+    parts = [f'<div style="position:relative;width:{wid:.0f}px;height:{hgt:.0f}px" id="{lid}"><div class="lring" id="{lid}_r" '
+             f'style="left:50%;top:50%;width:{hgt * 1.25:.0f}px;height:{hgt * 1.25:.0f}px;margin:-{hgt * 0.625:.0f}px 0 0 -{hgt * 0.625:.0f}px"></div>'
+             f'<img class="logoimg" src="{url}" style="width:100%;height:100%"></div>']
+    js = [f"(() => {{ const el = $('{lid}'), p = prog(t, 0.05, 1.0), e = expoOut(p); el.style.opacity = clamp(p * 2);"
+          f" el.style.transform = `scale(${{lerp(0.7, 1, e)}})`; el.style.filter = p < 1 ? `blur(${{(1 - e) * 20 * U}}px)` : 'none';"
+          f" const r = $('{lid}_r'), q = prog(t, 0.35, 1.2); r.style.opacity = (1 - q) * (q > 0 ? 0.9 : 0);"
+          f" r.style.transform = `scale(${{lerp(0.7, 2.4, cubicOut(q))}})`; }})();"]
+    name = sc.get("name", br.get("name", ""))
+    if name:
+        nid = _sid(i, "nm")
+        parts.append(f'<div id="{nid}" class="f-display txt persp" style="font-size:{96 * U:.1f}px;margin-top:{40 * U:.0f}px">{words_html(name)}</div>')
+        js.append(f"reveal($('{nid}'), t, 0.5, {{step: 0.08}});")
+    tag = sc.get("tagline", br.get("tagline"))
+    if tag:
+        gid = _sid(i, "tg")
+        parts.append(f'<div id="{gid}" class="txt persp" style="font-family:\'R-heavy\';font-size:{float(sc.get("tagline_size", 56)) * U:.1f}px;'
+                     f'color:var(--muted);margin-top:{14 * U:.0f}px">{words_html(tag)}</div>')
+        js.append(f"reveal($('{gid}'), t, 0.75, {{step: 0.06}});")
+    html = f'<div class="ccol persp" style="top:{P.cy:.0f}px;transform:translateY(-50%)">{"".join(parts)}</div>'
+    return {"html": html, "js": "(t, d) => { " + "\n".join(js) + " }", "sfx": [(0.05, "reveal", 0.8)], "corner": False}
+
+
+def w_counter(sc, P, i):
+    U = P.U
+    val = float(sc.get("value", 100))
+    dec = int(sc.get("decimals", 0 if val == int(val) else 1))
+    cd = float(sc.get("count_dur", 1.3))
+    nid = _sid(i, "n")
+    parts = [f'<div class="rule"><i></i><span>{esc(sc.get("kicker", ""))}</span><i></i></div>' if sc.get("kicker") else "",
+             f'<div class="num grad" style="font-size:{float(sc.get("size", 260)) * U:.1f}px"><span>{esc(sc.get("num_prefix", ""))}</span>'
+             f'<span id="{nid}">0</span><span>{esc(sc.get("suffix", ""))}</span></div>']
+    if sc.get("prefix"):
+        parts.insert(0, f'<div class="txt" style="font-family:\'R-heavy\';font-size:{60 * U:.1f}px;color:var(--muted)" id="{nid}_pf">{esc(sc["prefix"])}</div>')
+    if sc.get("label"):
+        parts.append(f'<div class="txt persp" id="{nid}_lb" style="font-family:\'R-heavy\';font-weight:800;font-size:{72 * U:.1f}px;margin-top:{10 * U:.0f}px">'
+                     f'{words_html(sc["label"])}</div>')
+    html = f'<div class="ccol persp" style="top:{P.cy:.0f}px;transform:translateY(-50%)">{"".join(parts)}</div>'
+    js = (f"(t, d) => {{ const p = expoOut(prog(t, 0.15, {cd})); $('{nid}').textContent = ({val} * p).toLocaleString('en-US', "
+          f"{{minimumFractionDigits: {dec}, maximumFractionDigits: {dec}}}); const pf = $('{nid}_pf'); if (pf) enter(pf, t, 0.05, {{y: 20}});"
+          f" reveal($('{nid}_lb'), t, 0.5, {{step: 0.07}}); }}")
+    return {"html": html, "js": js, "sfx": [(0.05, "whoosh", 0.35), (0.15 + cd * 0.85, "ding", 0.6)]}
+
+
+BUILDERS = {"kinetic": w_kinetic, "title": w_title, "contrast": w_contrast, "gallery": w_gallery, "wall": w_wall,
+            "bundle": w_bundle, "cta": w_cta, "logo": w_logo, "counter": w_counter, "stat": w_counter, "stats": w_counter}
+
+
+# ----------------------------------------------------------------- page
+def build_page(scenes, brief, ctx, wd):
+    P_ = P(ctx, wd)
+    css = "\n".join([fonts_css(ctx), root_css(P_), BASE_CSS.replace("__W__", str(P_.W)).replace("__H__", str(P_.H))
+                     .replace("__GRAIN__", grain_png(P_)), SCENE_CSS])
+    bg_html, bg_js = bg_layer(P_)
+    layers, defs = [], []
+    for i, sc in enumerate(scenes):
+        r = BUILDERS[sc["type"]](sc, P_, i)
+        sc["_sfx"] = r["sfx"]
+        kind = TRANS_MAP.get(sc.get("transition", "cut"), "fade") if i else "cut"
+        td = min(TRANS_DUR.get(kind, 0.45), max(0.2, sc["_dur"] * 0.4)) if kind != "cut" else 0
+        layers.append(f'<div class="scene" id="S{i}">{r["html"]}</div>')
+        defs.append(f"{{t0: {sc['_t0']:.4f}, d: {sc['_dur']:.4f}, tr: '{kind}', td: {td:.3f}, el: $('S{i}'), corner: "
+                    f"{'true' if r.get('corner', True) else 'false'}, fn: {r['js']}}}")
+    corner = ""
+    if ctx.brand.get("corner_logo"):
+        url, _ = _logo_url(P_)
+        corner = f'<img id="cornerlogo" src="{url}">'
+    page = f"""<!doctype html><html dir="rtl" lang="he"><head><meta charset="utf-8"><style>{css}</style></head><body>
+<div id="stage">{bg_html}<div id="scenes">{"".join(layers)}</div>{corner}<div id="ring"></div><div class="vig"></div><div class="grain"></div>
+<div id="flash"></div></div>
+<script>window.__U = {P_.U:.5f}; window.__W = {P_.W}; window.__H = {P_.H};
+{RUNTIME}
+{bg_js}
+window.__scenes = [{",".join(defs)}];
+window.seek(0);
+</script></body></html>"""
+    path = os.path.join(wd, "web", "index.html")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    open(path, "w", encoding="utf-8").write(page)
+    return path
+
+
+CHROME_ARGS = ["--no-sandbox", "--allow-file-access-from-files", "--disable-background-networking", "--disable-component-update",
+               "--disable-sync", "--no-first-run", "--disable-default-apps", "--metrics-recording-only", "--mute-audio",
+               "--font-render-hinting=none", "--force-color-profile=srgb", "--hide-scrollbars"]
+
+
+class Page:
+    """One Chrome page with the timeline loaded."""
+
+    def __init__(self, html, W, H):
+        from playwright.sync_api import sync_playwright
+        self.pw = sync_playwright().start()
+        exe = find_chrome()
+        self.br = self.pw.chromium.launch(executable_path=exe, args=CHROME_ARGS) if exe else self.pw.chromium.launch(args=CHROME_ARGS)
+        self.pg = self.br.new_page(viewport={"width": W, "height": H}, device_scale_factor=1)
+        self.pg.goto("file://" + os.path.abspath(html))
+        self.pg.evaluate("document.fonts.ready")
+        self.pg.wait_for_load_state("networkidle")
+        self.pg.evaluate("Promise.all([...document.images].map(i => i.decode().catch(() => 0)))")
+        self.pg.evaluate("window.__fit()")
+
+    def grab(self, t, png=False):
+        self.pg.evaluate(f"window.seek({t:.5f})")
+        b = self.pg.screenshot(type="png") if png else self.pg.screenshot(type="jpeg", quality=93)
+        return np.asarray(Image.open(io.BytesIO(b)).convert("RGB"))
+
+    def close(self):
+        self.br.close()
+        self.pw.stop()
+
+
+def _render_chunk(html, W, H, fps, frames, samples, shutter, out_path, crf):
+    pg = Page(html, W, H)
+    ff = subprocess.Popen([pe.FFMPEG, "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", str(fps),
+                           "-i", "-", "-c:v", "libx264", "-preset", "medium", "-crf", str(crf), "-pix_fmt", "yuv420p", out_path],
+                          stdin=subprocess.PIPE)
+    S = max(1, int(samples))
+    offs = [((s + 0.5) / S - 0.5) * shutter for s in range(S)] if S > 1 else [0.0]
+    t_last = time.time()
+    for n_done, f in enumerate(frames):
+        if S == 1:
+            fr = pg.grab(f / fps)
+        else:
+            a = pg.grab(max(0.0, (f + offs[0]) / fps)).astype(np.float32)
+            b = pg.grab(max(0.0, (f + offs[-1]) / fps)).astype(np.float32)
+            if S == 2 or np.abs(a[::8, ::8] - b[::8, ::8]).mean() < 0.6:
+                fr = (a + b) / 2
+            else:
+                acc = a + b
+                for o in offs[1:-1]:
+                    acc += pg.grab(max(0.0, (f + o) / fps))
+                fr = acc / S
+            fr = np.clip(fr + 0.5, 0, 255).astype(np.uint8)
+        ff.stdin.write(np.ascontiguousarray(fr).tobytes())
+        if time.time() - t_last > 20:
+            pe.log(f"[web] {os.path.basename(out_path)}: {n_done + 1}/{len(frames)} frames")
+            t_last = time.time()
+    ff.stdin.close()
+    ff.wait()
+    pg.close()
+
+
+def render_video(html, ctx, n_frames, workers, samples, shutter, wd, crf=17):
+    workers = max(1, min(workers, n_frames // 15 or 1))
+    chunks = np.array_split(np.arange(n_frames), workers)
+    segs, procs = [], []
+    for k, ch in enumerate(chunks):
+        seg = os.path.join(wd, f"web_seg{k:02d}.mp4")
+        segs.append(seg)
+        pr = Process(target=_render_chunk, args=(html, ctx.W, ctx.H, ctx.fps, [int(x) for x in ch], samples, shutter, seg, crf))
+        pr.start()
+        procs.append(pr)
+    for pr in procs:
+        pr.join()
+        if pr.exitcode != 0:
+            raise SystemExit("[web] a render worker failed")
+    lst = os.path.join(wd, "web_concat.txt")
+    with open(lst, "w") as f:
+        for s in segs:
+            f.write(f"file '{os.path.abspath(s)}'\n")
+    vid = os.path.join(wd, "video.mp4")
+    subprocess.run([pe.FFMPEG, "-y", "-v", "error", "-f", "concat", "-safe", "0", "-i", lst, "-c", "copy", vid], check=True)
+    for s in segs:
+        os.remove(s)
+    return vid
+
+
+def browser_problem():
+    """None when Playwright can start Chrome here, else a short reason."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return "Playwright is not installed (pip install playwright --break-system-packages)"
+    try:
+        with sync_playwright() as pw:
+            exe = find_chrome()
+            br = pw.chromium.launch(executable_path=exe, args=CHROME_ARGS) if exe else pw.chromium.launch(args=CHROME_ARGS)
+            br.close()
+    except Exception as e:  # no Chrome, missing system libraries, sandbox limits
+        return "Chrome could not start (" + (str(e).strip().splitlines() or ["unknown error"])[0][:160] + ")"
+    return None
+
+
+def classic(brief_path, out, fmt, draft, workers, preview, frame_at, workdir, creative, do_qa, plan, why):
+    """Render with the classic engine in its premium style (closest look to the web renderer)."""
+    if why:
+        pe.log(f"[web] {why} - rendering with the classic renderer (premium style)")
+    b = json.load(open(brief_path, encoding="utf-8"))
+    b.pop("renderer", None)
+    b.setdefault("fx", {"style": "premium"})
+    tmp = os.path.join(os.path.dirname(os.path.abspath(brief_path)), "." + os.path.basename(brief_path) + ".classic.json")
+    json.dump(b, open(tmp, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    try:
+        return pe.run(tmp, out, fmt, draft, workers, preview, frame_at, workdir, creative=creative, do_qa=do_qa, plan=plan)
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+
+
+def unsupported(brief):
+    return sorted({sc.get("type") for sc in brief.get("scenes", []) if sc.get("type") not in BUILDERS})
+
+
+def run_web(brief_path, out, fmt, draft, workers, preview, frame_at, workdir=None, creative=None, do_qa=True, plan=False,
+            samples=None):
+    t_start = time.time()
+    brief_path = os.path.abspath(brief_path)
+    brief = pe.load_brief(brief_path)
+    base_dir = os.path.dirname(os.path.abspath(brief_path))
+    os.chdir(base_dir)
+    bad = unsupported(brief)
+    if bad or brief.get("voiceover", {}).get("captions"):
+        why = f"scene types {', '.join(bad)}" if bad else "voiceover captions"
+        return classic(brief_path, out, fmt, draft, workers, preview, frame_at, workdir, creative, do_qa, plan,
+                       f"the web renderer does not support {why} yet")
+    if plan:
+        return pe.run(brief_path, out, fmt, draft, workers, preview, frame_at, workdir, creative=creative, do_qa=do_qa, plan=True)
+    prob = browser_problem()
+    if prob:
+        return classic(brief_path, out, fmt, draft, workers, preview, frame_at, workdir, creative, do_qa, plan, prob)
+    errs, warns = pe.validate(brief)
+    for w_ in warns:
+        pe.log("[warn] " + w_)
+    if errs:
+        for e_ in errs:
+            pe.log("[error] " + e_)
+        raise SystemExit(2)
+    brief.setdefault("fx", {"style": "premium"})
+    ctx = pe.Ctx(brief, fmt, draft)
+    stem = os.path.splitext(out)[0]
+    workdir = workdir or stem + "_work"
+    os.makedirs(workdir, exist_ok=True)
+    scenes = pe.make_plan(brief, ctx, workdir)
+    total = sum(s["_dur"] for s in scenes)
+    pe.log(f"[plan] {len(scenes)} scenes, {total:.1f}s, {ctx.W}x{ctx.H}@{ctx.fps} (web renderer {WEB_VERSION})")
+    for i, s in enumerate(scenes):
+        pe.log(f"  {i:02d} {s['_t0']:5.2f}s +{s['_dur']:.2f}s {s['type']:<12} {TRANS_MAP.get(s.get('transition'), 'fade') if i else 'cut'}")
+    html = build_page(scenes, brief, ctx, workdir)
+    if frame_at is not None:
+        pg = Page(html, ctx.W, ctx.H)
+        for fa in [float(x) for x in str(frame_at).split(",") if x.strip()]:
+            p = f"{stem}_frame_{fa:.2f}.png"
+            Image.fromarray(pg.grab(fa, png=True)).save(p)
+            print(p)
+        pg.close()
+        return
+    if preview:
+        pg = Page(html, ctx.W, ctx.H)
+        tw = 270 if not ctx.land else 400
+        thumbs = []
+        for i, s in enumerate(scenes):
+            for q in (0.5, 0.97):
+                im = Image.fromarray(pg.grab(s["_t0"] + s["_dur"] * q)).resize((tw, int(tw * ctx.H / ctx.W)))
+                pe.ImageDraw.Draw(im).text((8, 6), f"{i} {s['type']} {s['_t0'] + s['_dur'] * q:.1f}s", fill=(255, 255, 0), font=pe._label_font())
+                thumbs.append(im)
+        pg.close()
+        cols = 8 if not ctx.land else 4
+        rows = math.ceil(len(thumbs) / cols)
+        sheet = Image.new("RGB", (cols * tw, rows * thumbs[0].height), (30, 30, 30))
+        for j, im in enumerate(thumbs):
+            sheet.paste(im, ((j % cols) * tw, (j // cols) * im.height))
+        p = stem + "_preview.jpg"
+        sheet.save(p, quality=88)
+        print(p)
+        return
+    n_frames = sum(s["_n"] for s in scenes)
+    S = int(samples or brief.get("motion_blur", 1 if draft else 4))
+    t0 = time.time()
+    vid = render_video(html, ctx, n_frames, workers, S, float(brief.get("shutter", 0.5)), workdir)
+    pe.log(f"[web] {n_frames} frames in {time.time() - t0:.0f}s ({S} motion-blur samples)")
+    wav = os.path.join(workdir, "mix.wav")
+    pe.build_audio(brief, scenes, ctx, wav)
+    tmp = stem + ".tmp.mp4"
+    subprocess.run([pe.FFMPEG, "-y", "-v", "error", "-i", vid, "-i", wav, "-map", "0:v", "-map", "1:a", "-c:v", "copy",
+                    "-af", "loudnorm=I=-14:TP=-1.5:LRA=11", "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
+                    "-shortest", "-movflags", "+faststart", tmp], check=True)
+    os.replace(tmp, out)
+    if brief.get("music_free_version"):
+        b2 = dict(brief)
+        b2.pop("music", None)
+        wav2 = os.path.join(workdir, "mix_nomusic.wav")
+        pe.build_audio(b2, scenes, ctx, wav2)
+        nm = stem + "_no_music.mp4"
+        subprocess.run([pe.FFMPEG, "-y", "-v", "error", "-i", vid, "-i", wav2, "-map", "0:v", "-map", "1:a", "-c:v", "copy",
+                        "-af", "loudnorm=I=-16:TP=-1.5:LRA=11", "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
+                        "-shortest", "-movflags", "+faststart", nm], check=True)
+        print(nm)
+    # cover + layout check in one browser session
+    pg = Page(html, ctx.W, ctx.H)
+    ci = min(len(scenes) - 1, int(brief.get("cover_scene", 0)))
+    Image.fromarray(pg.grab(scenes[ci]["_t0"] + scenes[ci]["_dur"] * 0.7, png=True)).save(stem + "_cover.jpg", quality=92)
+    errs_l, warns_l = [], []
+    for i, s in enumerate(scenes):
+        for kind, txt, why in pg.pg.evaluate(f"window.__layout({s['_t0'] + s['_dur'] * 0.85:.3f}, {ctx.top}, {ctx.bot})"):
+            (errs_l if kind == "error" else warns_l).append(f"scene {i} ({s['type']}): '{txt}' {why}")
+    pg.close()
+    print(out)
+    rep = None
+    if do_qa and brief.get("qa", True):
+        pe.layout_issues = lambda sc_, cx_: (errs_l, warns_l)
+        rep = pe.qa(out, brief, scenes, ctx, creative, stem)
+        pe.log(f"[qa] automatic {rep['auto_points']}/75" + (f", total {rep['score']}/100" if rep.get("score") is not None else
+                                                             " (creative review pending)") +
+               f", {len(rep['errors'])} errors, {len(rep['warnings'])} warnings -> {stem}_qa.md")
+    try:
+        pe.log_run(brief_path, out, scenes, ctx, rep, time.time() - t_start)
+    except Exception as ex:
+        pe.log(f"[log] could not write the production log: {ex}")
+
+
+if __name__ == "__main__":
+    import argparse
+    if sys.argv[1:] == ["--check"]:
+        prob = browser_problem()
+        print(f"web renderer {WEB_VERSION}: " + (f"NOT ready - {prob}" if prob else f"ready (Chrome: {find_chrome() or 'Playwright Chromium'})"))
+        sys.exit(1 if prob else 0)
+    ap = argparse.ArgumentParser(description="promo-reel-maker web renderer (python3 promo_web.py --check tests Chrome)")
+    ap.add_argument("brief")
+    ap.add_argument("--out")
+    ap.add_argument("--format", default=None)
+    ap.add_argument("--draft", action="store_true")
+    ap.add_argument("--preview", action="store_true")
+    ap.add_argument("--frame")
+    ap.add_argument("--workers", type=int, default=os.cpu_count() or 2)
+    ap.add_argument("--samples", type=int)
+    a = ap.parse_args()
+    b = pe.load_brief(a.brief)
+    fmt = a.format or b.get("format", "9x16")
+    o = a.out or b.get("out", "promo.mp4")
+    if a.draft:
+        o = os.path.splitext(o)[0] + "_draft.mp4"
+    run_web(os.path.abspath(a.brief), o, fmt, a.draft, a.workers, a.preview, a.frame, samples=a.samples)
+```
+<!-- WEB:END -->

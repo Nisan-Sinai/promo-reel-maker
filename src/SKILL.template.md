@@ -1,11 +1,11 @@
 ---
 name: "promo-reel-maker"
-description: "Make branded, beat-synced promo videos (Reels/TikTok/Shorts/Status ads, YouTube promos) for a business from its clips, photos or website/brand repo: kinetic typography, motion graphics, device mockups, portfolio galleries and proof walls, automatic QA report. Hebrew/RTL first; 9:16 plus 1:1, 4:5, 16:9, up to 4K. Use for סרטון פרסומי, רילס לעסק, סרטון מיתוג, or 'make a video like this'."
+description: "Make branded, beat-synced promo videos (Reels/TikTok/Shorts/Status ads, YouTube promos) for a business from its clips, photos or website/brand repo: kinetic typography, motion graphics, device mockups, portfolio galleries, proof walls and 3D pop-outs, an optional Chrome renderer for cinematic motion, automatic QA report. Hebrew/RTL first; 9:16 plus 1:1, 4:5, 16:9, up to 4K. Use for סרטון פרסומי, רילס לעסק, סרטון מיתוג, or 'make a video like this'."
 ---
 
 # Promo Reel Maker
 
-Turns a business's raw clips/photos plus a few facts into a polished 20-40 s ad: kinetic gradient typography, a hook with footage playing *inside* the letters, red "problem" stamps that slam in, a logo reveal with a light sweep, service cards, a photo collage, counting stats, an animated checklist with the clip in a card, testimonial card with stars, before/after wipe, offer badge, and a CTA with a chat button, phone number and a tap animation. Cuts snap to the music's beat; whooshes/impacts/pops are placed automatically; audio is loudness-normalized; a cover image is exported. Everything is driven by one JSON brief and rendered by the bundled engine (Python + Pillow + numpy + ffmpeg, no browser). Unchanged scenes are cached, so edits and A/B hook variants re-render only what changed.
+Turns a business's raw clips/photos plus a few facts into a polished 20-40 s ad: kinetic gradient typography, a hook with footage playing *inside* the letters, red "problem" stamps that slam in, a logo reveal with a light sweep, service cards, a photo collage, counting stats, an animated checklist with the clip in a card, testimonial card with stars, before/after wipe, offer badge, and a CTA with a chat button, phone number and a tap animation. Cuts snap to the music's beat; whooshes/impacts/pops are placed automatically; audio is loudness-normalized; a cover image is exported. Everything is driven by one JSON brief and rendered by the bundled engine (Python + Pillow + numpy + ffmpeg), or - for the motion-graphics scenes - by an optional browser renderer that draws every frame in Chrome. Unchanged scenes are cached, so edits and A/B hook variants re-render only what changed.
 
 Version 2 adds what the strongest short-form ads do: photos get real camera moves (wide shots pan across instead of being cropped), footage stays bright with soft scrims and boxed caption-style text instead of a dimmed frame, a `showcase` scene for one-feature-per-shot tours, `features` (icon rows on glass), `location` (map-pin drop), a boxed hook, slide / light-leak / blur transitions, colour grades, Reels safe zones and scene lengths set in beats.
 
@@ -13,26 +13,32 @@ Version 3 adds brand and tech motion graphics that need no footage (Formula C): 
 
 Version 3.1 adds the neon course/agency ad (Formula D): `contrast` (✕ what they use today, ✓ the answer, a chat bar that types a request, a caption that switches when the ✓ lands), `gallery` (a fast portfolio reel of real screenshots or clips inside a 3D phone or laptop, with a 01/07 counter and labels), `wall` (all the work on a tilted 3D wall, with quote cards for real testimonials), `bundle` (1-3 offer cards joined by "+"), a `neon` colour preset, a typing sound, and a solid pill CTA button (`button_style`, `button_icon`). v3.0 briefs render pixel-identical.
 
+Version 3.2 adds motion styles (`fx`). `premium`: smooth, cinematic motion - elements ease in with a soft blur, cards turn gently in 3D with a light sheen, the camera settles slowly, and scenes change with push, zoom-through and cube transitions. `hype` (energy 1-3): zoom punches on the beat, camera shake, colour split and glitch on hits, a live background and fast 3D transitions (`cube`, `spin`, `zoom_blur`, `slices`, `shape`, `diamond`). Both add pop-outs to `gallery`: a block of a screenshot (a product card, a dashboard, a chat bubble) lifts out of the phone or laptop screen toward the viewer, with its real rounded corners. Without `fx`, every older brief renders pixel-identical.
+
+Version 4 adds a second renderer, `"renderer": "web"`. The same engine plans the video, snaps it to the beat, mixes the sound, makes the cover and runs QA, but every frame of the motion-graphics scenes (kinetic, title, contrast, gallery, wall, bundle, counter/stat, logo, cta) is drawn by Chrome: real CSS 3D (phones and laptops that turn, cards that lift off the screen), sub-pixel motion with motion blur, sharp type and soft shadows. It is clearly more polished than the classic renderer and is the recommended choice for Formula D. It needs Playwright and a Chrome or Chromium browser in the workspace; when they are missing, or a brief uses a scene type it does not draw yet, the video renders with the classic renderer in the premium style automatically. The classic renderer and every older brief are unchanged.
+
 ## 0. Setup (once per session)
 
-1. Extract the engine from this SKILL.md (no retyping). The skill's base directory is given when the skill loads; if not, find it with `find / -name SKILL.md -path "*promo-reel-maker*" 2>/dev/null | head -1`.
+1. Extract the engine and the web renderer from this SKILL.md (no retyping). The skill's base directory is given when the skill loads; if not, find it with `find / -name SKILL.md -path "*promo-reel-maker*" 2>/dev/null | head -1`.
 ```bash
 python3 - "<skill base dir>/SKILL.md" <<'EOF'
 import sys, os
 s = open(sys.argv[1], encoding="utf-8").read()
-code = s.rsplit("<!-- ENGINE:" + "BEGIN -->", 1)[1].rsplit("<!-- ENGINE:" + "END -->", 1)[0]
-code = code.split("```python\n", 1)[1].rsplit("```", 1)[0]
-p = os.path.expanduser("~/.cache/promo-reel/promo_engine.py")
-os.makedirs(os.path.dirname(p), exist_ok=True)
-open(p, "w", encoding="utf-8").write(code)
-print(p)
+for tag, name in (("ENGINE", "promo_engine.py"), ("WEB", "promo_web.py")):
+    code = s.rsplit("<!-- " + tag + ":" + "BEGIN -->", 1)[1].rsplit("<!-- " + tag + ":" + "END -->", 1)[0]
+    code = code.split("```python\n", 1)[1].rsplit("```", 1)[0]
+    p = os.path.expanduser("~/.cache/promo-reel/" + name)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    open(p, "w", encoding="utf-8").write(code)
+    print(p)
 EOF
-python3 -m py_compile ~/.cache/promo-reel/promo_engine.py && echo engine-ok
+python3 -m py_compile ~/.cache/promo-reel/promo_engine.py ~/.cache/promo-reel/promo_web.py && echo engine-ok
 ```
-   Only if SKILL.md is not readable on disk, write the code block in the Engine section verbatim to that path. If py_compile reports an error, fix that line.
+   Only if SKILL.md is not readable on disk, write the code blocks in the Engine and Web renderer sections verbatim to those paths (promo_web.py must sit next to promo_engine.py). If py_compile reports an error, fix that line.
 2. Check tools: `ffmpeg -version`, `python3 -c "import numpy, PIL; from PIL import features; print(features.check('raqm'))"`. If raqm is False: `pip install python-bidi --break-system-packages` (needed for correct Hebrew order). scipy is optional (only for synthesized fallback SFX); `qrcode` only if a QR is wanted.
 3. Fonts (Rubik, Heebo, Secular One, Frank Ruhl, Assistant, Rubik Dirt, Suez One, Karantina, Fredoka, Varela Round, Noto Sans Hebrew, Geist, Geist Mono) download automatically from Google Fonts on GitHub into ~/.cache/promo_fonts; if blocked, the engine falls back to local Hebrew fonts.
-4. Optional but quick (about 10 s): `python3 $E --selftest` renders every scene type from synthetic media at draft size and runs QA. It must print `SELFTEST PASS` (the short test CTA is expected to miss the 4 s rule). Run it after any change to the engine.
+4. Web renderer (needed only for `"renderer": "web"`): `python3 -c "import playwright" 2>/dev/null || pip install playwright --break-system-packages`, then `python3 ~/.cache/promo-reel/promo_web.py --check`. It uses a system Chrome (`/usr/bin/google-chrome`, Chromium, or the path in the `CHROME` environment variable). If it reports that no browser could start, try `python3 -m playwright install chromium` once; if the download is blocked, carry on - briefs with `"renderer": "web"` then render with the classic renderer in the premium style, and tell the user the video used the fallback.
+5. Optional (about 1-2 minutes): `python3 $E --selftest` renders every scene type from synthetic media at draft size three times - as is, with `fx` energy 3 (every transition, camera hits, pop-outs), and with the web renderer (skipped, with the reason, when Chrome is not available) - and runs QA on each. It must print `fx pass: ok`, `web pass: ok` (or `skipped`) and `SELFTEST PASS` (the short test CTA is expected to miss the 4 s rule). Run it after any change to the engine.
 
 Below, `E=~/.cache/promo-reel/promo_engine.py`.
 
@@ -113,7 +119,7 @@ Kinetic lines are design lines: each one stays on one line and shrinks to fit (s
 
 ### Formula D - neon course / agency ad: portfolio, proof and offer (courses, studios, freelancers, agencies)
 
-Built from the user's REAL work: screenshots of their own sites or apps, clips of their products, real messages from clients. Theme: the brand kit's colours, or `{"preset": "neon", "type": "tech", "bg_style": "tech"}` (dark violet with orange/purple neon) when the brand has none.
+Built from the user's REAL work: screenshots of their own sites or apps, clips of their products, real messages from clients. Theme: the brand kit's colours, or `{"preset": "neon", "type": "tech", "bg_style": "tech"}` (dark violet with orange/purple neon) when the brand has none. Render it with `"renderer": "web"` (section 2c) whenever the web check passes; otherwise add `"fx": {"style": "premium"}` to the classic renderer.
 
 | # | scene | purpose | example copy (Nisan Sinai Technologies) | length |
 |---|---|---|---|---|
@@ -126,7 +132,7 @@ Built from the user's REAL work: screenshots of their own sites or apps, clips o
 | 7 | cta | logo, one action; `button_style: primary` + `button_icon: false` gives a solid pill like a course ad | "בואו נבנה משהו מעולה" | ≥ 4 s |
 
 Real assets only: gallery and wall items are the user's own work - label demo or concept projects as such in the tag (the demo used "Shel-Yah · פרויקט הדגמה", the site's own wording); a counter shows a real number; quote cards come only from messages the user sends (screenshots or exact text) and is allowed to publish - never invent or "illustrate" a testimonial. If there are no real quotes, the wall shows the work itself. Never copy the reference ad's brand, screenshots, testimonials or copy.
-Screenshots: when a browser is available, open the user's own sites, decline cookie banners (the privacy-preserving choice), scroll to the hero and to two or three key sections and take screenshots; close the tabs you opened. Remove the mouse cursor and browser-extension icons from each screenshot (`cv2.inpaint` on a small mask, or crop). Use desktop screenshots in the laptop (`device: laptop`; the label becomes a large headline under it) and tall mobile screenshots in the phone (they scroll automatically). `focus` [x, y] in an item's `src` aims the crop. On the wall set `tile_ratio` to the screenshots' height/width (0.45 for desktop screenshots, 1.9-2.2 for mobile) and `tile_w` 0.5 for wide tiles.
+Screenshots: when a browser is available, open the user's own sites, decline cookie banners (the privacy-preserving choice), scroll to the hero and to two or three key sections and take screenshots; close the tabs you opened. Remove the mouse cursor and browser-extension icons from each screenshot (`cv2.inpaint` on a small mask, or crop). Use desktop screenshots in the laptop (`device: laptop`; the label becomes a large headline under it) and tall mobile screenshots in the phone (they scroll automatically). `focus` [x, y] in an item's `src` aims the crop. Phone screenshots: if the browser window cannot be made phone-sized, load the site inside a same-origin iframe 430 px wide (scaled up for sharpness) and capture it in parts, stitched top to bottom. Pop-outs look best when the box is the real element: read its `getBoundingClientRect()` and computed `border-radius` in the browser and divide by the page width/height, so the lifted piece has exactly the card's edges and corners. On the wall set `tile_ratio` to the screenshots' height/width (0.45 for desktop screenshots, 1.9-2.2 for mobile) and `tile_w` 0.5 for wide tiles.
 
 Copy rules: Hebrew unless asked otherwise; one idea per scene; big lines short (about 12 characters looks best - longer lines auto-shrink); small lines up to about 25 characters; digits for numbers; total 15-30 s for Formulas A, C and D, 25-40 s for Formula B; CTA at least 4 s. Multi-line text is balanced automatically (no single word left on the last line).
 Honesty: never invent numbers, testimonials, client names, certifications or prices. If something is missing, drop that scene, or use an obviously marked placeholder and tell the user it must be replaced before publishing. The CTA button draws a generic chat icon (no third-party logos); naming WhatsApp in the button text is fine.
@@ -148,6 +154,27 @@ Set `"platform"` and the engine picks the format, the safe band and the length c
 | youtube / promo (brand film, explainer) | 16x9 | 6%-94% | 30-120 s |
 
 Resolution: 1080 wide by default (1080x1920 for 9:16, 1920x1080 for 16:9). `"scale": 2` renders 4K (2160x3840 / 3840x2160) with vector-sharp text; it takes about 4 times as long, so render 4K only when it is asked for, after the 1080 version is approved.
+
+### 2c. Motion style and renderer
+
+Two independent choices, both optional:
+
+| setting | what it does | when |
+|---|---|---|
+| no `fx` (default) | the calm v3.1 motion, pixel-identical to older versions | existing briefs, photo-led ads |
+| `"fx": {"style": "premium"}` | smooth, cinematic motion: soft-blur entrances, gentle 3D card turns with a sheen, a slow camera settle, push / zoom-through / cube transitions chosen by the next scene, gallery pop-outs with real corners | brand, tech and portfolio ads; the classic fallback of the web renderer |
+| `"fx": {"energy": 1-3}` (or "low" / "high" / "crazy") | hype: punches and shake on hits, live background, fast 3D transitions rotated automatically, every gallery item pops out | loud, short pieces with strong music; energy 2 for Reels, 3 only for very short loud clips |
+| `"renderer": "web"` | every frame of the motion-graphics scenes drawn by Chrome with real 3D, motion blur and sharp type; the premium style is implied | Formula D and any video built only from the scene types listed below |
+
+Hype levels: 1 - a zoom punch, camera shake and a brief colour split on every cut and impact sound; 2 - level 1 stronger, a punch on every beat, glitch bands on hits, light streaks and a ring burst on brand backgrounds, elements that slam in with a motion trail and keep bouncing to the beat, transitions rotated through cube, zoom_blur, slices, spin, shape, whip, diamond and glitch, a thump under each cut; 3 - level 2 at full strength with a white flash on hits. A calm scene can opt out with `"fx": false`. Feedback from real use: viewers read hype as amateurish when it runs for a whole ad - prefer premium (or the web renderer) for brands, and use hype only when the user asks for it.
+
+Web renderer details:
+- Draws: kinetic, title, contrast, gallery (phone or laptop, with pop-outs), wall, bundle, counter / stat / stats, logo, cta. Any other scene type, or voiceover captions, sends the whole brief to the classic renderer (premium style) with a log line saying why - mixing renderers inside one video is not supported.
+- Transitions: push, push_up, zoom_through, cube, shape, diamond, fade, blur, flash, cut; the classic names map onto them (zoom, punch, spin, glitch → zoom_through; whip, slide → push; slide_up, slices → push_up; leak → fade).
+- Top-level fields: `motion_blur` (samples per frame, 4; 1 with `--draft`; only moving frames take extra samples), `shutter` (0.5 of a frame).
+- Same commands as the classic renderer (`--plan`, `--preview`, `--frame`, `--draft`, `--qa`), same QA, cover and music-free version. Pop-outs are kept inside the frame automatically (a too-large `scale` is reduced). It has no scene cache: every full render redraws every frame, so look at `--frame` stills first.
+- Speed: about 5-6 minutes for 30 s of 1080x1920 on 2 cores (about 0.2 s per capture); `--draft` (half size, no motion blur) about 1 minute. Run it in the foreground with a long timeout.
+- `python3 ~/.cache/promo-reel/promo_web.py --check` says whether Chrome can start here.
 
 ## 3. Prepare footage
 
@@ -218,7 +245,7 @@ Write `brief.json` (reference below; starters: `python3 $E --new property|servic
 - `python3 $E brief.json --plan` - storyboard + layout check, no render (section 1b).
 - `python3 $E brief.json --preview --draft` - contact sheet of every scene (2 frames each) at half size, a few seconds. Look at it.
 - `python3 $E brief.json --frame 1.2,9,15,21,31` - full-size PNGs at those seconds; look at the busiest moments (hook, cards, device, CTA) before the full render. Check: Hebrew reads in order, no single word alone on a line, nothing touches the frame edge, text is outside the platform's UI zones.
-- `python3 $E brief.json` - final MP4 + `<out>_cover.jpg`, then automatic QA. About 1 minute per 30 s of 1080x1920 on 2 cores; run it in the foreground with a long timeout. The plan printed first shows each scene's start, length, transition and clip.
+- `python3 $E brief.json` - final MP4 + `<out>_cover.jpg`, then automatic QA. About 1 minute per 30 s of 1080x1920 on 2 cores with the classic renderer (about 2.5 minutes with hype energy 2, 5-6 minutes with the web renderer); run it in the foreground with a long timeout. The plan printed first shows each scene's start, length, transition and clip.
 - Edits: change the brief and run again - only scenes whose content changed re-render (cache in `<out>_work/`, keyed by scene content, clip file contents, theme and engine version). A scene's cache also depends on the scene before it (transitions blend from its last frame). `--draft` writes separate `_draft` files. After editing the engine itself, delete `<out>_work/` so no stale scene is reused.
 
 Automatic QA (written after every render unless `--no-qa` or `"qa": false`; run it alone with `python3 $E brief.json --qa out.mp4`): `<out>_qa.md`, `<out>_qa.json` and `<out>_qa_sheet.jpg` (1 frame per second).
@@ -254,7 +281,7 @@ Send the MP4 and a preview image (8 key frames from the final file, or the cover
 ## 8. Maintenance and versioning
 
 - The engine prints its version (`--help` header; `VERSION` in the code) and every render appends one line to `~/.cache/promo-reel/runs.jsonl` (brief, output, scenes, duration, render time, QA score, errors, warnings). `python3 $E --history` shows the last renders - use it to spot recurring problems across jobs.
-- Lessons from a job go into that log or the conversation, not straight into this file. Change the skill only through a reviewed update: back up the current SKILL.md, change the engine and docs, run `--selftest` and a real render of an old brief (backward compatibility), then propose the update for the user to save. Never delete a working scene type, field or option; add new behaviour behind new fields or defaults that leave older briefs unchanged. Random choices (background drift, particles) are seeded from the scene content with a frozen salt (`SEED_SALT`), not from `VERSION`, so the same brief looks the same after an engine upgrade - check this by rendering `--frame` stills of an old brief with the previous and the new engine and comparing pixels (expect a difference of 0).
+- Lessons from a job go into that log or the conversation, not straight into this file. Change the skill only through a reviewed update: back up the current SKILL.md, change the engine and docs, run `--selftest` and a real render of an old brief (backward compatibility), then propose the update for the user to save. Never delete a working scene type, field or option; add new behaviour behind new fields or defaults that leave older briefs unchanged. Random choices (background drift, particles) are seeded from the scene content with a frozen salt (`SEED_SALT`), not from `VERSION`, so the same brief looks the same after an engine upgrade - check this by rendering `--frame` stills of an old brief with the previous and the new engine and comparing pixels (expect a difference of 0). The web renderer has its own version (`WEB_VERSION` in promo_web.py, printed in the plan line) and is covered by the self-test's web pass.
 
 ## Brief reference
 
@@ -355,6 +382,8 @@ Top-level fields:
 - `music`: `file, start, volume (0.8), beat_sync (true)`. `voiceover`: `file, at, volume, text, captions (true), words_per_caption, caption_chars, caption_size, caption_y` - music ducks under it; `text` turns on captions (section 4).
 - `sfx`: true | false | {name: path or {file, sync, max, gain}}; `sfx_volume` (0.55).
 - `variants`: [{name, scenes: {"<index in scenes>": {overrides}}}] - extra outputs `<out>_<name>.mp4` sharing the cache.
+- `renderer`: classic (default) | web - which renderer draws the frames (section 2c); `motion_blur` (4), `shutter` (0.5) for the web renderer.
+- `fx`: {"style": "premium"} | {"energy": 0-3} | "premium" | "low" | "high" | "crazy" - motion style (section 2c); a scene can set `"fx": false` to stay calm.
 - `qa` (true): run QA after rendering; `cover_scene` (0): which scene the cover image is taken from; `music_free_version` (false): also write `<out>_no_music.mp4`.
 
 Clip spec: `"path"` or `{src, start, speed, fit: auto|cover|blur, focus: [x, y], move, amount, pan_speed, look: {bw, dim, blur, grade, vignette, bright, contrast, sat, warm}}`. Photo `move`: auto (default) | push | pull | pan_left | pan_right | pan_up | pan_down | drift | still; `amount` = push/pull zoom (0.13); `pan_speed` = frame widths per second (0.2).
@@ -384,11 +413,11 @@ Every scene accepts: `dur` or `beats` (length in music beats; needs music), `tra
 | text | lines [str or {text, style small\|body\|big\|accent, anim, size}], clip | 2.0 | punch |
 | cta | eyebrow, eyebrow_size (46), headline, headline_size (92), button (text or false), button_style cta\|primary (cta = the theme's cta colour), button_icon (true = chat icon; false = centered text pill), phone, website, qr (url), logo (true), tap_at, clip | 5.0 | zoom |
 | contrast | items [{text, mark x\|check, size (76 ✕ / 90 ✓)}], per (0.55), start (0.15), prompt (chat bar that types it), prompt_at, cps (14 characters/s), caption (shown until the ✓), caption2 (from the ✓; alone it appears with the ✓), highlight (words), caption_size (46), clip | start + per × items + 1.4, longer with a prompt | blur |
-| gallery | items [{src (image or clip spec), label, tag, icon, highlight}], per (0.7), kicker, device phone\|laptop, device_scale (1), swing (9), label_style pill\|headline (headline: laptop in portrait), label_size (72), clip | 0.45 + per × items + 0.6 | zoom |
+| gallery | items [{src (image or clip spec), label, tag, icon, highlight}], per (0.7), kicker, device phone\|laptop, device_scale (1), swing (9), label_style pill\|headline (headline: laptop in portrait), label_size (72), pop true\|alternate\|false (item `pop`: true\|false\|{box [x0, y0, x1, y1] as fractions of the screenshot, radius (fraction of its width), scale (1.35 premium / 1.8 hype), at}), clip | 0.45 + per × items + 0.6 | zoom |
 | wall | images, cols (6), rows (5), tile_w (0.27 of width), tile_ratio (tile height/width, 1.9), wall_dim (0.6), wall_ry (-14), wall_rx (32), title, title_size (96), title_highlight (default: numbers), sub, quotes [{text, highlight, who, label, size}], quote_label, quotes_at (0.9), per_quote (1.9) | max(3, quotes_at + per_quote × quotes + 0.6) | blur |
 | bundle | items [{title, text, image, tags [text or {text, icon}], size (66)}] (up to 3), title, title_size (90), clip | 0.2 + 0.55 × items + 2.2 | slide_up |
 
-Transitions: cut, flash, punch, fade, zoom, whip, slide, slide_up, glitch, blur, leak (warm light leak). Text animations: up, down, fade, pop, zoom, slam, wipe, left, right, none.
+Transitions: cut, flash, punch, fade, zoom, whip, slide, slide_up, glitch, blur, leak (warm light leak), push (the next scene pushes the last one out), zoom_through (the camera flies through the last scene into the next), cube (3D cube turn), spin (rotating whip with motion blur), zoom_blur (radial zoom through a flash), slices (strips sliding in from alternate sides), shape (circle opening with a ring in the theme colour), diamond (the same with a diamond). Text animations: up, down, fade, pop, zoom, slam, wipe, left, right, none.
 Icons (label, place, features, cards): pin, people, bed, view, waves, pool, star, sparkle, check, home, snow (air conditioning), wifi, parking, sun, heart, calendar, chat, phone, key, book, kitchen, coffee, clock, web, cart, layers, bolt, gear, code, chip, chart, rocket, search, lock. An unknown icon falls back to check (with a warning).
 Outputs: `<out>.mp4`, `<out>_cover.jpg`, `<out>_qa.md/.json`, `<out>_qa_sheet.jpg`, `<out>_storyboard.md` (`--plan`), `<out>_preview.jpg`, `<out>_frame_<t>.png`, `<out>_work/` (cache + plan.json with final timings).
 
@@ -411,6 +440,10 @@ Command line: `python3 $E [brief.json] [--out FILE] [--format F] [--draft] [--pr
 - A gallery screenshot is cut badly: aim it with `focus` in the item's `src` spec, or use the phone for tall screenshots and the laptop for wide ones.
 - The wall shows its edges or tiles look stretched: set `tile_ratio` to the screenshots' real height/width and add `rows`; the wall is scaled to cover the frame.
 - The typing bar finishes too late: raise `cps` or shorten the `prompt` (the scene grows to fit it).
+- `[web] ... rendering with the classic renderer`: the web renderer could not run (Playwright or Chrome missing, or an unsupported scene type) - the line says which; fix it (setup step 4) or accept the premium-style classic render and tell the user.
+- A pop-out lifts the wrong part of a screenshot: set the item's `pop` to {"box": [x0, y0, x1, y1], "radius": r} from the real element (Formula D), or `false`.
+- Hype motion feels too busy or cheap: switch to `"fx": {"style": "premium"}` or the web renderer; or lower the energy and set `"fx": false` on calm scenes.
+- Web renderer text wraps oddly around a hyphen: hyphens between words are made non-breaking automatically; for other breaks, split the line in the brief.
 - A logo shows a square box behind it: it is opaque with a non-uniform background; supply a transparent PNG (`logo_bg: keep` turns off the automatic corner removal).
 
 ## Engine
@@ -419,3 +452,10 @@ Command line: `python3 $E [brief.json] [--out FILE] [--format F] [--draft] [--pr
 ```python
 {{ENGINE}}```
 <!-- ENGINE:END -->
+
+## Web renderer
+
+<!-- WEB:BEGIN -->
+```python
+{{WEB}}```
+<!-- WEB:END -->
