@@ -1,11 +1,15 @@
 ---
-name: promo-reel-maker
-description: Make branded, beat-synced promo videos (Reels/TikTok/Status ads) for a business from its clips, logo and details. Hebrew/RTL first; 9:16 plus 1:1, 4:5, 16:9. Use for סרטון פרסומי, רילס לעסק, or 'make a video like this'.
+name: "promo-reel-maker"
+description: "Make branded, beat-synced promo videos (Reels/TikTok/Shorts/Status ads, YouTube promos) for a business from its clips, photos or website/brand repo: kinetic typography, motion graphics, device mockups, automatic QA report. Hebrew/RTL first; 9:16 plus 1:1, 4:5, 16:9, up to 4K. Use for סרטון פרסומי, רילס לעסק, סרטון מיתוג, or 'make a video like this'."
 ---
 
 # Promo Reel Maker
 
 Turns a business's raw clips/photos plus a few facts into a polished 20-40 s ad: kinetic gradient typography, a hook with footage playing *inside* the letters, red "problem" stamps that slam in, a logo reveal with a light sweep, service cards, a photo collage, counting stats, an animated checklist with the clip in a card, testimonial card with stars, before/after wipe, offer badge, and a CTA with a chat button, phone number and a tap animation. Cuts snap to the music's beat; whooshes/impacts/pops are placed automatically; audio is loudness-normalized; a cover image is exported. Everything is driven by one JSON brief and rendered by the bundled engine (Python + Pillow + numpy + ffmpeg, no browser). Unchanged scenes are cached, so edits and A/B hook variants re-render only what changed.
+
+Version 2 adds what the strongest short-form ads do: photos get real camera moves (wide shots pan across instead of being cropped), footage stays bright with soft scrims and boxed caption-style text instead of a dimmed frame, a `showcase` scene for one-feature-per-shot tours, `features` (icon rows on glass), `location` (map-pin drop), a boxed hook, slide / light-leak / blur transitions, colour grades, Reels safe zones and scene lengths set in beats.
+
+Version 3 adds brand and tech motion graphics that need no footage (Formula C): an animated brand background (moving glows, particles, slow camera push), kinetic typography with mask reveals, glass service cards with a highlight pass, a process timeline, phone/laptop mockups with animated illustrative UI or a real screenshot, a logo burst. It also adds a creative-planning step with a storyboard (`--plan`), platform presets, brand kits extracted from a website or repo (`--brand-from`), captions for a recorded voiceover, brief validation with recovery, an automatic QA report with a 0-100 score (`--qa`), a production log (`--history`), starter templates (`--new`) and a self-test (`--selftest`). v1 and v2 briefs keep rendering with the same scenes and style (multi-line text is now balanced across lines).
 
 ## 0. Setup (once per session)
 
@@ -25,19 +29,55 @@ python3 -m py_compile ~/.cache/promo-reel/promo_engine.py && echo engine-ok
 ```
    Only if SKILL.md is not readable on disk, write the code block in the Engine section verbatim to that path. If py_compile reports an error, fix that line.
 2. Check tools: `ffmpeg -version`, `python3 -c "import numpy, PIL; from PIL import features; print(features.check('raqm'))"`. If raqm is False: `pip install python-bidi --break-system-packages` (needed for correct Hebrew order). scipy is optional (only for synthesized fallback SFX); `qrcode` only if a QR is wanted.
-3. Fonts (Rubik, Heebo, Secular One, Frank Ruhl, Assistant, Rubik Dirt, Suez One, Karantina, Fredoka, Varela Round) download automatically from Google Fonts on GitHub into ~/.cache/promo_fonts; if blocked, the engine falls back to local Hebrew fonts.
+3. Fonts (Rubik, Heebo, Secular One, Frank Ruhl, Assistant, Rubik Dirt, Suez One, Karantina, Fredoka, Varela Round, Noto Sans Hebrew, Geist, Geist Mono) download automatically from Google Fonts on GitHub into ~/.cache/promo_fonts; if blocked, the engine falls back to local Hebrew fonts.
+4. Optional but quick (about 10 s): `python3 $E --selftest` renders every scene type from synthetic media at draft size and runs QA. It must print `SELFTEST PASS` (the short test CTA is expected to miss the 4 s rule). Run it after any change to the engine.
 
 Below, `E=~/.cache/promo-reel/promo_engine.py`.
 
 ## 1. Gather inputs
 
-Required: business name; what they offer (list of services/products); who it is for; contact (phone/WhatsApp and/or website); footage (videos/photos or a folder).
-Optional: logo PNG (transparent is best; without one the engine draws an emblem from `initials`), brand colors or vibe, tagline, REAL numbers (clients, years, workers, projects, rating), a REAL testimonial, an offer, length (default about 30 s), formats (default 9:16), music vibe.
+Required: business name; what they offer (list of services/products); who it is for; contact (phone/WhatsApp and/or website); footage (videos/photos or a folder) - or, for brand/tech videos, the brand's website or repo.
+Optional: logo PNG (transparent is best; an opaque square icon also works - its flat background corners are removed automatically; without a logo the engine draws an emblem from `initials`), brand colors or vibe, tagline, REAL numbers (clients, years, workers, projects, rating), a REAL testimonial, an offer, length (default about 30 s), platform/formats (default Reels 9:16), music vibe, a recorded voiceover with its exact text.
 Ask for missing required items in one short message; don't block on optional ones.
+
+Brand kit from official assets: when the brand has a website folder or repo (clone a public repo with `git clone --depth 1 <url>`), run `python3 $E --brand-from <dir> --kit brand_kit.json`. It reads CSS colour variables, font families, the web manifest (name, description), the largest logo/icon PNG (saved as brand_logo.png next to the kit), the most frequent phone number and the site URL (from SITE_URL/metadataBase, skipping tests and third-party domains). Check the printed kit against the source - never invent brand details or swap the logo - then point the brief at it with `"brand_kit": "brand_kit.json"`. Copy for the video should come from the site's own text (hero line, services, process, CTA); read it from the content files. Respect what the site says about itself (e.g. "prices quoted after discovery" means no prices in the video).
 
 If the user sends a reference video ("make one like this"): analyze it first - contact sheet (`ffmpeg -i ref.mp4 -vf "fps=1,scale=180:-1,tile=12x3" -frames:v 1 ref.jpg`), cut detection (`ffmpeg -i ref.mp4 -vf "select='gt(scene,0.12)',showinfo" -an -f null - 2>&1 | grep -o "pts_time:[0-9.]*"`), and a spectrogram (`showspectrumpic`) to see music vs voice and where SFX hit. Map its structure and pacing onto the scene types below. Imitate structure and pacing only - never reuse another business's brand, logo, footage or copy in the user's video.
 
-## 2. Write the script (the ad formula)
+## 1b. Creative plan (before writing the brief)
+
+Write a short `creative_plan.md` in the project folder (it is a working file, not a deliverable):
+1. Goal (leads, bookings, awareness), audience, platform and length.
+2. Two or three distinct concepts, each as a table row: concept, the hook in the first 2.5 s, strengths, weaknesses. Different concepts differ in the opening and the story arc, not just in colours.
+3. Pick one and say why in two sentences (hook strength for muted viewers, clarity, what real assets exist).
+4. The script and timeline: scene, time, on-screen copy - from the formulas in section 2.
+Then write the brief and run `python3 $E brief.json --plan`: it prints the beat-snapped plan, writes `<out>_storyboard.md` (time, length, beats, copy, visual and transition per scene) and checks every text/graphic element against the frame edges and the platform's safe band - without rendering. Fix any layout error before previewing. Show the plan and storyboard to the user only if they want to approve copy first; never present a plan, storyboard or still frames as if they were the finished video.
+
+## 2. Write the script
+
+What the strongest short-form ads have in common (research, Nov 2026):
+- The first 1.5-3 s decide reach. Open on the single best visual, bright and already moving, with the hook text on screen by 0.3 s. No logo intro, no black frames, no slow fade-in.
+- Most people watch muted: every scene carries its message in on-screen text short enough to read at a glance.
+- 15-30 s gets the best completion. One idea per shot, about 2-4 beats each, every cut on a beat.
+- Sell the experience, not a listing: the view, coffee on the balcony, the bed - one feature per shot with a 1-3 word label.
+- Keep text in the safe band: the Reels/TikTok interface covers roughly the top 13% and bottom 24% (ads: bottom 35%).
+- End on one clear action (WhatsApp/phone), held long enough to read.
+- Long holds need motion: a slow camera push, a highlight passing over cards, elements that keep floating. A frame where nothing moves for more than about 1.5 s reads as a slideshow.
+
+### Formula A - photo-led: apartments, vacation rentals, venues, shops, restaurants, products
+
+| # | scene | purpose | example copy | beats (~118 BPM) |
+|---|---|---|---|---|
+| 1 | hook, style box | best visual + promise | small "דירת נופש · קו ראשון לכנרת" (icon pin) / big "תתעוררו מול הכנרת" | 4 |
+| 2 | location | where it is | place "קו ראשון לכנרת" / title "נוף פנורמי לכל הכנרת" | 5 |
+| 3-7 | showcase (3-6x) | the tour, one feature each | label "סלון מרווח" (icon home) / title "מול הנוף" | 3-4 each; one 2-beat shot with no text adds rhythm |
+| 8 | features | the facts that decide | 4-6 icon rows: capacity, amenities, location | 8 |
+| 9 | showcase, style words | emotional close | "הנוף, השקט, והכל במקום אחד" with highlight on 1-2 words | 4 |
+| 10 | cta | one action | eyebrow, headline, button, phone | 10 |
+
+Shot order: best shot first, then where it is, then inside (living → bedrooms → kitchen → outdoor), then the facts, then the feeling, then the action. Showcase titles: 2-3 words. Use the boxed style on photos; `style: words` (white words, highlighted key words) for the emotional line over a calm shot.
+
+### Formula B - services (problem → solution)
 
 | # | scene type | purpose | example copy | typical dur |
 |---|---|---|---|---|
@@ -52,9 +92,43 @@ If the user sends a reference video ("make one like this"): analyze it first - c
 | 9 | title | who it's for | small "פתרון מיידי" / big "לקבלנים" / big2 "רשומים" | 1.7 s |
 | 10 | cta | one clear action | eyebrow, "לקבלת הצעת מחיר", button, phone | 5 s |
 
-Copy rules: Hebrew unless asked otherwise; one idea per scene; big lines short (about 12 characters looks best - longer lines auto-shrink); small lines up to about 25 characters; digits for numbers; total 25-40 s, 10-16 scenes; CTA at least 4 s.
+### Formula C - brand / tech motion graphics (no footage needed): software, agencies, SaaS, studios, personal brands
+
+Theme: `{"preset": "tech", "type": "tech", "bg_style": "tech"}` or a brand kit. Start from `python3 $E --new tech`.
+
+| # | scene | purpose | example copy (Nisan Sinai Technologies) | beats (~120 BPM) |
+|---|---|---|---|---|
+| 1 | kinetic | pain as a question, 3-4 deliberate lines, last one accent | העסק שלך / עדיין רץ / **על אקסל** / **ווואטסאפ?** | 4-5 |
+| 2 | kinetic | the turn | small "יש דרך אחרת." / טכנולוגיה / accent "שמסדרת את העסק." | 4 |
+| 3 | logo (burst) | brand + one-line tagline | name + "אתרים, חנויות ומערכות לעסקים בכל הארץ" | 6 |
+| 4 | kinetic | the promise (the site's hero line) | אני בונה את / accent הטכנולוגיה / שהעסק שלך צריך. | 5 |
+| 5 | cards | what you build (4-6 services, icon + 2-4 words) | kicker "WEB · CRM · ERP · AUTOMATION", title "מה אני בונה" | 9-10 |
+| 6 | device | the product feeling: phone/laptop with animated UI or a REAL screenshot | label "מערכות CRM" / title "לקוחות ולידים במערכת אחת", note "*המחשה" | 6-7 |
+| 7 | steps | how working together goes (3-4 steps) | "מהרעיון למערכת שעובדת." | 9-10 |
+| 8 | cta | one action | eyebrow "יש לך רעיון?" / "בואו נבנה משהו מעולה" / WhatsApp / phone / site | 12-13 |
+
+Kinetic lines are design lines: each one stays on one line and shrinks to fit (set `"wrap": true` on a line to allow wrapping), so break the copy into lines yourself, 2-3 words each. Mono kickers are for Latin labels (WEB · CRM); Hebrew kickers automatically use the heavy font. The device scene's built-in UI (dashboard, crm, flow, shop) is abstract shapes in brand colours with no numbers: label it with `note` ("*המחשה") unless it shows a real screenshot (`image`), and never put invented data, client names or results in a screenshot.
+
+Copy rules: Hebrew unless asked otherwise; one idea per scene; big lines short (about 12 characters looks best - longer lines auto-shrink); small lines up to about 25 characters; digits for numbers; total 15-30 s for Formulas A and C, 25-40 s for Formula B; CTA at least 4 s. Multi-line text is balanced automatically (no single word left on the last line).
 Honesty: never invent numbers, testimonials, client names, certifications or prices. If something is missing, drop that scene, or use an obviously marked placeholder and tell the user it must be replaced before publishing. The CTA button draws a generic chat icon (no third-party logos); naming WhatsApp in the button text is fine.
 Unless the user wants to approve copy first, go straight to the preview and show the script together with the preview sheet.
+
+### Platforms
+
+Set `"platform"` and the engine picks the format, the safe band and the length check (QA warns outside the range). One 9:16 master usually serves Reels, TikTok and Shorts; render other formats with `formats`.
+
+| platform | format | text safe band (top-bottom of height) | recommended length |
+|---|---|---|---|
+| reels (Instagram/Facebook Reels) | 9x16 | 13%-76% | 15-30 s |
+| tiktok | 9x16 | 12%-74% | 15-35 s |
+| shorts (YouTube) | 9x16 | 13%-76% | 15-45 s |
+| stories / WhatsApp status | 9x16 | 13%-76% | 5-15 s |
+| ads (paid placements) | 9x16 | 14%-65% | 6-30 s |
+| feed | 4x5 | 6%-94% | 10-30 s |
+| square | 1x1 | 6%-94% | 10-30 s |
+| youtube / promo (brand film, explainer) | 16x9 | 6%-94% | 30-120 s |
+
+Resolution: 1080 wide by default (1080x1920 for 9:16, 1920x1080 for 16:9). `"scale": 2` renders 4K (2160x3840 / 3840x2160) with vector-sharp text; it takes about 4 times as long, so render 4K only when it is asked for, after the 1080 version is approved.
 
 ## 3. Prepare footage
 
@@ -62,14 +136,16 @@ Unless the user wants to approve copy first, go straight to the preview and show
 - For every clip: `ffprobe` (size, duration, rotation) and a contact sheet (`ffmpeg -i c.mp4 -vf "fps=3,scale=160:-1,tile=8x3" -frames:v 1 c.jpg`) - look at it.
 - Burnt-in text, subtitles, watermarks, UI overlays (common in clips taken from social media or other ads): crop them out (`-vf crop=w:h:x:y`) or skip those seconds. Check the whole clip - animated text moves through the frame.
 - Casting: hook = the most colorful, high-motion clip (it fills the letters); stamps = problem footage (rendered black-and-white); one clip per service item; stats/checklist = clean, calm shots; CTA = anything (it is blurred).
-- The engine handles: landscape/square clips (auto blur-fill), photos (Ken Burns), rotation, best-moment selection when `start` is omitted (most active window, never the same moment twice), clips shorter than their scene (they loop - prefer `"speed": 0.6` slow-mo or a shorter `dur`).
-- No footage at all: scenes without a clip render on a branded grid panel. It works, but tell the user real footage converts better.
+- Photos get a virtual camera move (clip spec `move`): wide photos in a tall frame pan across the whole picture instead of being cropped, others push in. Vary moves between neighbouring scenes (push, pan_left, pull, pan_right, drift) and aim with `focus` [x, y]. Never leave a photo static.
+- The engine handles: landscape/square clips (auto blur-fill), photos (camera moves), rotation, best-moment selection when `start` is omitted (most active window, never the same moment twice), clips shorter than their scene (they loop - prefer `"speed": 0.6` slow-mo or a shorter `dur`).
+- No footage at all: use Formula C on the animated brand background (`bg_style: tech`), or scenes without a clip render on a branded grid panel. Tell the user real footage or real product screenshots convert better.
+- Missing files never crash a render: a missing clip falls back to the branded background, a missing screenshot to the animated UI, a missing logo to the initials emblem, missing music to SFX only - each with a `[warn]` line. Unknown scene types and missing required fields stop the render with a clear `[error]` before anything is drawn.
 
 ## 4. Sound
 
-Follow the video-sound-effects skill if it is available (Soundza first, then Openverse/Wikimedia). Save files in `assets/sfx/` and list them in `assets/sfx/CREDITS.md`.
+Follow the video-sound-effects skill if it is available (Soundza first, then Openverse/Wikimedia). Save files in `assets/sfx/` and list them in `assets/sfx/CREDITS.md`. Use only free, licensed sources (Soundza's license allows commercial use) - never ripped commercial music.
 
-Music: Soundza `search_sounds` with type=music, parts=full_mix, vocals=none, fit_seconds=<video length>, a mood/genre that fits the business (trap/hip-hop for construction and trades, upbeat corporate for services, lo-fi for cafes, cinematic for real estate). If nothing fits, `generate_music` with model="lyria", duration about length+10 s, bpm 120-140, a plain description of business and vibe - and tell the user the music is AI-generated.
+Music: Soundza `search_sounds` with type=music, parts=full_mix, vocals=none, fit_seconds=<video length>, a mood/genre that fits the business (trap/hip-hop for construction and trades, upbeat corporate for services, modern tech/electronic for software, lo-fi for cafes, cinematic for real estate). If nothing fits, `generate_music` with model="lyria", duration about length+10 s, bpm 120-140, a plain description of business and vibe - and tell the user the music is AI-generated (catalog tracks can be AI-generated too: check `ai_content`).
 Check the track before using it - generated and library tracks often contain breakdowns, near-silent bars or a sparse intro. Print an energy map; skip an intro with `music.start`, and splice out a breakdown that would land under the collage/CTA on strong beat onsets:
 ```python
 import sys, os, wave, numpy as np
@@ -82,16 +158,29 @@ def splice(c1, c2, out):  # keep [0,c1) + [c2,end); c1/c2 = onsets of strong hit
     with wave.open(out, "wb") as w:
         w.setnchannels(2); w.setsampwidth(2); w.setframerate(sr); w.writeframes((np.clip(z, -1, 1)*32767).astype(np.int16).tobytes())
 ```
-The engine detects tempo and snaps every scene cut to a beat (`beat_sync`, default on).
+Loop-based library tracks usually repeat their strongest section: find the onsets of its first hit (`pe.detect_beats(y)` plus a 20 ms energy scan around the jump) and join two copies of that section, so the whole video runs on the high-energy part.
+Pick a track with a clear beat: 110-128 BPM for listings, products and services; 60-90 BPM only for slow luxury pieces. Ambient pads with no drums make a cut-on-beat edit feel like a slideshow - don't use them for ads. If nothing in the catalog fits, generate one: `generate_music` with model "stable", looping true, bpm 118 and a plain description (genre, drums, lead instruments, mood); "lyria" gives full tracks but sometimes fails, so fall back to "stable". Generated loops often drop energy in their second half - keep the strongest 8 bars and repeat them (bar = loop length / bars):
+```python
+import sys, os, wave, numpy as np
+sys.path.insert(0, os.path.expanduser("~/.cache/promo-reel")); import promo_engine as pe
+x = pe.load_audio("assets/sfx/loop.wav", 0, None, loop=False); sr = pe.SR
+bar = len(x) / sr / 16                      # 16 = the loop's bar count from generate_music
+seg = x[:int(round(8 * bar * sr))]; f = int(.006 * sr); r = np.linspace(0, 1, f)[:, None]; out = seg.copy()
+for _ in range(2):
+    out = np.concatenate([out[:-f], out[-f:] * (1 - r) + seg[:f] * r, seg[f:]])
+with wave.open("assets/sfx/music.wav", "wb") as w:
+    w.setnchannels(2); w.setsampwidth(2); w.setframerate(sr); w.writeframes((np.clip(out, -1, 1) * 32767).astype(np.int16).tobytes())
+```
+The engine detects tempo and snaps every scene cut to a beat (`beat_sync`, default on). Give scenes a length in beats (`"beats": 4`) instead of seconds so the edit locks to the music.
 
 SFX: the engine fires these names automatically. Proven Soundza picks (download once with `download_sound`; `sync` = the result's sync_ms/1000; `max` trims long files):
 
 | name | fires on | Soundza id (title) | sync | extra |
 |---|---|---|---|---|
-| whoosh | zoom/whip/slide_up transitions, collage, wipe | cmujffw8b2an6jwenoz4r1gxb (Fast Cable Whoosh) | 0.293 | |
+| whoosh | zoom/whip/slide_up transitions, collage, wipe, device | cmujffw8b2an6jwenoz4r1gxb (Fast Cable Whoosh) | 0.293 | |
 | impact | hook, stamp slam, offer slam | cmujfj249qoihsspc4q3yzwqj (Dark Boom Impact) | 0 | |
 | thump | punch/flash cuts | cmvcm7a6809ezelyj5xjojlco (Punch Impact) | 0.064 | |
-| pop | checklist ticks, stars | cmvcmbf6rxr815bt4tf7g6xlm (Bubble Pop UI Tap) | 0.054 | |
+| pop | checklist ticks, stars, cards, steps | cmvcmbf6rxr815bt4tf7g6xlm (Bubble Pop UI Tap) | 0.054 | |
 | click | CTA tap | cmukcwidhpq87pi9kz3rtqlqf (Mouse Click Warm) | 0.005 | |
 | ding | counter lands | cmvcmbkdi4e6xbwonobll8ebf (Desk Bell Ding) | 0.315 | max 1.5, gain 0.7 |
 | reveal | logo | cmvcm7nb06a2l2llux8dxyn0n (Dramatic Impact Hit) | 0.325 | max 2.5 |
@@ -99,18 +188,51 @@ SFX: the engine fires these names automatically. Proven Soundza picks (download 
 
 More options: Soundza pack `video-editing-sound-effects-whooshes-pops-clicks-glitches-and-camera-shutters`. Any SFX file that is missing falls back to a synthesized version, so a video never ships silent. When the video is published, suggest (optional) crediting soundza.com.
 
-## 5. Brief, preview, render
+Voiceover and captions: there is no text-to-speech in this engine; check whether the session has a TTS tool, and if not, ask the user for a recorded voiceover (phone recording is fine) plus its exact text. Brief: `"voiceover": {"file": "assets/vo.wav", "text": "<exact words>", "at": 0.3, "volume": 1.0}`. The engine aligns the words to the recording without a speech model (phrases, split at punctuation, are matched to the stretches of speech between pauses, and words are spread by length inside each phrase - so punctuate the text where the speaker pauses), shows them as boxed captions 1-3 words at a time in the safe band, and ducks the music under the voice. Check the caption timing on `--frame` stills at a few spoken moments; if a caption runs early or late, split the text at the pause or adjust `at`. Fields: `words_per_caption` (3), `caption_chars` (18), `caption_size` (64), `caption_y` (centre as a fraction of the height; default just inside the bottom of the safe band), `captions` (true). With captions on, keep scene text at `pos` top or center - `--plan` warns about every scene whose text sits under the captions. Never guess what someone says in a recording - captions come only from text the user gave.
 
-Write `brief.json` (reference below), then:
-- `python3 $E brief.json --preview --draft` - contact sheet of every scene (2 frames each) at half size, about 10-20 s. Look at it.
-- `python3 $E brief.json --frame 1.2,9,15,21,31` - full-size PNGs at those seconds; look at the busiest moments (hook, collage, checklist, CTA) before the full render.
-- `python3 $E brief.json` - final MP4 + `<out>_cover.jpg`. About 1 minute per 15-20 s of 1080x1920 on 2 cores; run it in the foreground with a long timeout. The plan printed first shows each scene's start, length, transition and clip.
-- Edits: change the brief and run again - only scenes whose content changed re-render (cache in `<out>_work/`, keyed by scene content and clip file contents). `--draft` writes separate `_draft` files.
-- Verify the final: `ffprobe` (duration, h264 + aac), loudness about -14 LUFS (`ffmpeg -i out.mp4 -af ebur128 -f null - 2>&1 | grep "I:"`), and a 1 fps contact sheet - look at it.
+## 5. Brief, preview, render, QA
+
+Write `brief.json` (reference below; starters: `python3 $E --new property|service|tech > brief.json`, then replace every `<<...>>`), then:
+- `python3 $E brief.json --plan` - storyboard + layout check, no render (section 1b).
+- `python3 $E brief.json --preview --draft` - contact sheet of every scene (2 frames each) at half size, a few seconds. Look at it.
+- `python3 $E brief.json --frame 1.2,9,15,21,31` - full-size PNGs at those seconds; look at the busiest moments (hook, cards, device, CTA) before the full render. Check: Hebrew reads in order, no single word alone on a line, nothing touches the frame edge, text is outside the platform's UI zones.
+- `python3 $E brief.json` - final MP4 + `<out>_cover.jpg`, then automatic QA. About 1 minute per 30 s of 1080x1920 on 2 cores; run it in the foreground with a long timeout. The plan printed first shows each scene's start, length, transition and clip.
+- Edits: change the brief and run again - only scenes whose content changed re-render (cache in `<out>_work/`, keyed by scene content, clip file contents, theme and engine version). A scene's cache also depends on the scene before it (transitions blend from its last frame). `--draft` writes separate `_draft` files. After editing the engine itself, delete `<out>_work/` so no stale scene is reused.
+
+Automatic QA (written after every render unless `--no-qa` or `"qa": false`; run it alone with `python3 $E brief.json --qa out.mp4`): `<out>_qa.md`, `<out>_qa.json` and `<out>_qa_sheet.jpg` (1 frame per second).
+
+| part | check (measured) | points |
+|---|---|---|
+| technical | file opens, h264 + aac, yuv420p | 10 |
+| technical | resolution, aspect and fps match the plan | 10 |
+| technical | duration matches the plan (±0.2 s) | 5 |
+| technical | no unplanned black frames over 0.25 s (ffmpeg blackdetect) | 10 |
+| technical | no frozen picture over 1.5 s (freezedetect) | 5 |
+| technical | loudness -16 to -12 LUFS; true peak ≤ -1 dBTP (ebur128) | 6 + 4 |
+| technical | no silent gap over 1 s (silencedetect) | 5 |
+| technical | no text/graphic cut off at the frame edge (element bounds); elements outside the safe band are listed as warnings | 5 |
+| structure | first scene is a hook type and ≤ 3 s; ends on a CTA held ≥ 4 s; average shot 1.2-4 s | 5 + 5 + 5 |
+| creative | hook strength, clarity/readability, pacing/rhythm, aesthetics/brand, message/CTA - 0-5 each | 25 |
+
+The first 75 points are measured. The creative 25 are a reviewer's judgement: watch the QA sheet and the key frames, score honestly, and record it with `python3 $E brief.json --qa out.mp4 --creative 4,5,4,4,5`. The report labels it as subjective; when reporting to the user, give the measured part and the judgement separately and never present the total as objective proof of quality. Target: measured 75/75 with no errors, total 90 or more. Below that: fix the cause in the brief (copy length, line breaks, scene length, music section, layout) and re-render - only changed scenes re-render. Also look at the frames around every cut (`ffmpeg -ss <cut±0.1> -i out.mp4 -frames:v 1`) - QA does not judge whether a transition looks good.
 
 ## 6. Deliver
 
-Send the MP4 (and cover) with SendUserFile. In the reply: one or two lines, a ready-to-paste post caption (Hebrew, 2-3 lines + CTA + 5-8 hashtags), and offer the cheap extras: 2-3 alternative hooks for A/B testing (`variants` - only the hook re-renders) and other formats (`formats`).
+Send the MP4 and a preview image (8 key frames from the final file, or the cover) with SendUserFile, plus the QA report when the user asked for one. In the reply: one or two lines, a ready-to-paste post caption (Hebrew, 2-3 lines + CTA + 5-8 hashtags), and offer the cheap extras: 2-3 alternative hooks for A/B testing (`variants` - only the hook re-renders) and other formats (`formats`). Never post, upload or publish the video, or push changes to a repository, without the user's explicit approval.
+
+## 7. Limits (say them plainly instead of faking them)
+
+- No text-to-speech or voice cloning in the engine; voiceover only from a recording the user supplies (or a TTS tool the session actually has).
+- No generative video and no stock-footage downloads: visuals are the user's footage/photos/screenshots, motion graphics and the illustrative device UI.
+- No paid tools: budget 0 - no credits, subscriptions or charges. Music and SFX come from free licensed libraries (Soundza); say when a track is AI-generated.
+- The illustrative UI is not a real product: label it, or use real screenshots.
+- 4K is supported (`scale: 2`) but slow; render it only when asked.
+- Font downloads and Soundza need network access; without it the engine uses local Hebrew fonts and synthesized SFX.
+
+## 8. Maintenance and versioning
+
+- The engine prints its version (`--help` header; `VERSION` in the code) and every render appends one line to `~/.cache/promo-reel/runs.jsonl` (brief, output, scenes, duration, render time, QA score, errors, warnings). `python3 $E --history` shows the last renders - use it to spot recurring problems across jobs.
+- Lessons from a job go into that log or the conversation, not straight into this file. Change the skill only through a reviewed update: back up the current SKILL.md, change the engine and docs, run `--selftest` and a real render of an old brief (backward compatibility), then propose the update for the user to save. Never delete a working scene type, field or option; add new behaviour behind new fields or defaults that leave older briefs unchanged.
 
 ## Brief reference
 
@@ -141,23 +263,72 @@ Example (valid JSON):
 }
 ```
 
+Formula A example (scenes only; top-level fields as above, plus `"theme": {"preset": "gold", "type": "bold", "grade": "bright"}`):
+```json
+"scenes": [
+  {"type": "hook", "style": "box", "small": "דירת נופש · קו ראשון לכנרת", "icon": "pin", "big": "תתעוררו מול הכנרת",
+   "clip": {"src": "clips/view.jpg", "move": "pan_right", "pan_speed": 0.16}, "beats": 4, "impact": 0},
+  {"type": "location", "place": "קו ראשון לכנרת", "title": "נוף פנורמי לכל הכנרת", "clip": {"src": "clips/view2.jpg", "move": "push"}, "beats": 5},
+  {"type": "showcase", "label": "סלון מרווח", "icon": "home", "title": "מול הנוף", "clip": {"src": "clips/living.jpg", "move": "pan_left"}, "beats": 4},
+  {"type": "showcase", "label": "מטבח", "icon": "kitchen", "title": "מאובזר קומפלט", "clip": "clips/kitchen.jpg", "beats": 4},
+  {"type": "showcase", "clip": {"src": "clips/bedroom2.jpg", "move": "pull"}, "beats": 2, "scrim": 0},
+  {"type": "features", "title": "מה מחכה לכם", "clip": {"src": "clips/view3.jpg", "move": "drift"}, "beats": 8, "transition": "blur",
+   "items": [{"icon": "people", "text": "מתאימה עד 10 נפשות"}, {"icon": "view", "text": "נוף פנורמי לכל הכנרת"}, {"icon": "book", "text": "אזור דתי"}]},
+  {"type": "showcase", "style": "words", "title": "הנוף, השקט, והכל במקום אחד", "highlight": ["השקט", "אחד"], "pos": "center", "clip": "clips/balcony.jpg", "beats": 4},
+  {"type": "cta", "clip": "clips/view.jpg", "logo": false, "eyebrow": "חופשה של שלווה ונוף", "headline": "להזמנות ופרטים", "button": "שלחו הודעה בוואטסאפ", "transition": "leak", "beats": 10}
+]
+```
+
+Formula C example - the tested acceptance brief (Nisan Sinai Technologies, 29.8 s, QA 75/75):
+```json
+{
+  "out": "nisan_sinai_reel.mp4", "platform": "reels", "format": "9x16", "brand_kit": "brand_kit.json",
+  "theme": {"preset": "tech", "type": "tech", "bg_style": "tech", "grade": "bright"},
+  "brand": {"website": "nisan-sinai-technologies.vercel.app", "corner_logo": true},
+  "music": {"file": "assets/sfx/music_edit.wav", "volume": 0.8},
+  "scenes": [
+    {"type": "kinetic", "lines": ["העסק שלך", "עדיין רץ", {"text": "על אקסל", "style": "accent", "underline": false}, {"text": "ווואטסאפ?", "style": "accent"}], "beats": 5, "transition": "cut"},
+    {"type": "kinetic", "lines": [{"text": "יש דרך אחרת.", "style": "small"}, "טכנולוגיה", {"text": "שמסדרת את העסק.", "style": "accent"}], "beats": 4, "transition": "punch", "start": 0, "stagger": 0.13},
+    {"type": "logo", "tagline": "אתרים, חנויות ומערכות לעסקים בכל הארץ", "tagline_size": 64, "burst": true, "beats": 6},
+    {"type": "kinetic", "lines": ["אני בונה את", {"text": "הטכנולוגיה", "style": "accent"}, "שהעסק שלך צריך."], "beats": 5},
+    {"type": "cards", "kicker": "WEB · CRM · ERP · AUTOMATION", "kicker_size": 42, "title": "מה אני בונה", "cols": 2, "beats": 10,
+     "items": [{"icon": "web", "title": "אתרים וחנויות אונליין"}, {"icon": "people", "title": "מערכות CRM"}, {"icon": "layers", "title": "מערכות ERP וניהול"},
+               {"icon": "bolt", "title": "אוטומציות ואינטגרציות"}, {"icon": "code", "title": "מערכות Web בהתאמה אישית"}, {"icon": "chip", "title": "AI לעסקים"}]},
+    {"type": "device", "device": "phone", "ui": "crm", "ui_title": "CRM", "label": "מערכות CRM", "icon": "people", "title": "לקוחות ולידים במערכת אחת", "note": "*המחשה", "device_scale": 0.9, "beats": 7},
+    {"type": "steps", "title": "מהרעיון למערכת שעובדת.", "per": 0.55, "beats": 10,
+     "items": [{"title": "מבינים את העסק", "size": 68}, {"title": "מתכננים את הפתרון", "size": 68}, {"title": "בונים ובודקים", "size": 68}, {"title": "עולים לאוויר", "size": 68}]},
+    {"type": "cta", "logo": true, "eyebrow": "יש לך רעיון?", "eyebrow_size": 60, "headline": "בואו נבנה משהו מעולה", "headline_size": 104, "button": "שלחו הודעה בוואטסאפ", "beats": 13}
+  ]
+}
+```
+
 Top-level fields:
-- `out` (default promo.mp4); `format`: 9x16 | 1x1 | 4x5 | 16x9; `formats`: list - renders each (suffix _<fmt>); `fps` (30).
-- `theme`: `preset` gold | fire | electric | fresh | royal | clean (light) | auto (colors from the logo); color overrides `primary, primary2, hi, accent, bg, text, muted, cta` (hex); `type` (typeset) bold | classic | condensed | elegant | playful | retro; `font_display/font_heavy/font_body/font_stamp` = a .ttf path or a font key.
-- `brand`: `name, tagline, initials, logo, phone, website, corner_logo` (small logo top-left on footage scenes).
+- `out` (default promo.mp4); `format`: 9x16 | 1x1 | 4x5 | 16x9; `formats`: list - renders each (suffix _<fmt>); `fps` (30); `platform` (section 2, Platforms) sets the default format, safe band and length check; `scale` (1; 2 = 4K).
+- `safe`: reels (default; text between 13% and 76% of the height) | tiktok | ads (bottom 35% kept clear, for paid placements) | full.
+- `theme`: `grade` bright (default) | warm | cool | punchy | natural - colour grade for all footage; `preset` gold | fire | electric | fresh | royal | clean (light) | tech (dark, cyan/violet) | auto (colors from the logo); color overrides `primary, primary2, hi, accent, bg, text, muted, cta` (hex); `type` (typeset) bold | classic | condensed | elegant | playful | retro | tech (Noto Sans Hebrew + Geist Mono labels); `font_display/font_heavy/font_body/font_stamp/font_mono` = a .ttf path or a font key; `bg_style` grid (default, static branded grid) | tech (animated glows, drifting particles, grid fading at the edges); `drift` = slow camera push per scene (0.035 with bg_style tech, 0 with grid; a scene can set its own `drift`, 0 = off).
+- `brand`: `name, tagline, initials, logo, phone, website, corner_logo` (small logo top-left on footage scenes and on the animated background), `logo_bg` auto (default: removes the flat square background of an opaque logo) | keep.
+- `brand_kit`: path to a kit from `--brand-from`; its theme and brand fields are defaults the brief can override.
 - `clips`: pool of clips (paths or specs) and/or `clips_dir`: auto-assigned to scenes that have no `clip` key (set `"clip": null` to force the panel).
-- `music`: `file, start, volume (0.8), beat_sync (true)`. `voiceover`: `file, at, volume` - music ducks under it.
+- `music`: `file, start, volume (0.8), beat_sync (true)`. `voiceover`: `file, at, volume, text, captions (true), words_per_caption, caption_chars, caption_size, caption_y` - music ducks under it; `text` turns on captions (section 4).
 - `sfx`: true | false | {name: path or {file, sync, max, gain}}; `sfx_volume` (0.55).
 - `variants`: [{name, scenes: {"<index in scenes>": {overrides}}}] - extra outputs `<out>_<name>.mp4` sharing the cache.
+- `qa` (true): run QA after rendering; `cover_scene` (0): which scene the cover image is taken from; `music_free_version` (false): also write `<out>_no_music.mp4`.
 
-Clip spec: `"path"` or `{src, start, speed, fit: auto|cover|blur, focus: [x, y], kenburns: in|out, look: {bw, dim, blur, grade, vignette}}`.
-Every scene accepts: `dur, transition, clip, look, zoom, audio` (true = keep the clip's own sound, music ducks) and `audio_volume`.
+Clip spec: `"path"` or `{src, start, speed, fit: auto|cover|blur, focus: [x, y], move, amount, pan_speed, look: {bw, dim, blur, grade, vignette, bright, contrast, sat, warm}}`. Photo `move`: auto (default) | push | pull | pan_left | pan_right | pan_up | pan_down | drift | still; `amount` = push/pull zoom (0.13); `pan_speed` = frame widths per second (0.2).
+Every scene accepts: `dur` or `beats` (length in music beats; needs music), `transition, clip, look, zoom, audio` (true = keep the clip's own sound, music ducks), `audio_volume`, `drift` and `corner_logo` (false hides it on that scene). `services` also takes `beats_per`.
 
 | type | fields | default dur | default transition in |
 |---|---|---|---|
-| hook | small, big, clip, style video\|plain, backdrop blur\|black, size | 2.2 | cut |
+| hook | small, big, clip, style box\|video\|plain, icon (box), impact (sfx gain), backdrop blur\|black, size | 2.2 | cut |
+| showcase | clip, label, icon, title, sub, style box\|words, pos bottom\|top\|center, size, highlight (words), anim, scrim (0 = none), box_color | 2.0 | slide |
+| location | clip, place, title, pos, size | 2.6 | zoom |
+| features | items [{icon, text}] (up to 6), title, clip, dim (0.82), size, pos | 0.6 + 0.32 per item + 1.5 | zoom |
+| kinetic | lines [str or {text, style big\|accent\|small\|mono\|box, size, underline (accent lines), wrap}], kicker, kicker_size (38), pos center\|top\|bottom, start (0.06), stagger (0.16), underline (true), clip | 2.2 | blur |
+| cards | items [{icon, title, text}] (4-6), kicker, kicker_size (40), title, title_size (96), cols (2), card_ratio (0.9), highlight (true), highlight_step (0.32), rtl, clip | 0.8 + 0.12 per card + 1.8 | zoom |
+| steps | items [{title, text, size (60)}] (3-5), title, title_size (96), per (0.55 s between steps), clip | 0.6 + per × items + 1.4 | slide_up |
+| device | device phone\|laptop, ui dashboard\|crm\|flow\|shop, ui_title, image (real screenshot), label, icon, title, style box\|plain, size, tilt (-12), device_scale (1), note, note_size (30), clip | 3.0 | zoom |
 | stamp | line, stamp, clip, bw (true) | 1.9 | glitch |
-| logo | clip, name, tagline (default: brand) | 2.5 | zoom |
+| logo | clip, name, tagline (default: brand), tagline_size (56), burst (on with bg_style tech) | 2.5 | zoom |
 | title | small, big, big2, size, underline, anim, small_anim | 1.3 | whip |
 | services | small, per, items [text or {text, clip, dur}] - expands to titles | per item | whip, then punch |
 | collage | small, big, clips (4-6) | 2.4 | zoom |
@@ -168,10 +339,13 @@ Every scene accepts: `dur, transition, clip, look, zoom, audio` (true = keep the
 | before_after | before, after, labels, wipe_at, caption | 3.6 | whip |
 | offer | badge, big, small, note, clip | 2.8 | flash |
 | text | lines [str or {text, style small\|body\|big\|accent, anim, size}], clip | 2.0 | punch |
-| cta | eyebrow, headline, button (text or false), phone, website, qr (url), logo (true), tap_at, clip | 5.0 | zoom |
+| cta | eyebrow, eyebrow_size (46), headline, headline_size (92), button (text or false), phone, website, qr (url), logo (true), tap_at, clip | 5.0 | zoom |
 
-Transitions: cut, flash, punch, fade, zoom, whip, slide_up, glitch. Text animations: up, down, fade, pop, zoom, slam, wipe, left, right, none.
-Outputs: `<out>.mp4`, `<out>_cover.jpg`, `<out>_preview.jpg`, `<out>_frame_<t>.png`, `<out>_work/` (cache + plan.json with final timings).
+Transitions: cut, flash, punch, fade, zoom, whip, slide, slide_up, glitch, blur, leak (warm light leak). Text animations: up, down, fade, pop, zoom, slam, wipe, left, right, none.
+Icons (label, place, features, cards): pin, people, bed, view, waves, pool, star, sparkle, check, home, snow (air conditioning), wifi, parking, sun, heart, calendar, chat, phone, key, book, kitchen, coffee, clock, web, cart, layers, bolt, gear, code, chip, chart, rocket, search, lock. An unknown icon falls back to check (with a warning).
+Outputs: `<out>.mp4`, `<out>_cover.jpg`, `<out>_qa.md/.json`, `<out>_qa_sheet.jpg`, `<out>_storyboard.md` (`--plan`), `<out>_preview.jpg`, `<out>_frame_<t>.png`, `<out>_work/` (cache + plan.json with final timings).
+
+Command line: `python3 $E [brief.json] [--out FILE] [--format F] [--draft] [--preview] [--frame T,T] [--plan] [--qa VIDEO] [--creative h,c,p,a,m] [--no-qa] [--variant NAME] [--workers N] | --new property|service|tech | --brand-from DIR [--kit FILE] | --selftest | --history`.
 
 ## Troubleshooting
 
@@ -180,7 +354,14 @@ Outputs: `<out>.mp4`, `<out>_cover.jpg`, `<out>_preview.jpg`, `<out>_frame_<t>.p
 - Visible loop jump: the clip is shorter than its scene - add `speed` < 1 or shorten `dur`.
 - A scene lands too long/short after beat snapping: set its `dur` explicitly, or `"beat_sync": false`.
 - Text too long: it auto-shrinks; shorten the copy instead for impact.
+- Feels like a slideshow: use music with a clear beat, lengths in `beats`, and a different photo `move` on each neighbouring scene; on motion-graphics videos keep `drift` on and the card `highlight` on.
+- Text hard to read on a bright photo: use the boxed style (default in showcase/hook box) or raise `scrim`; don't dim the whole frame.
 - Music has a gap under the CTA: re-splice (section 4) or change `music.start`.
+- A kinetic line came out small: it is one long line shrunk to fit - split it into two lines in the brief.
+- An empty moment right after a cut: set the next kinetic scene's `start` to 0 and a shorter `stagger`.
+- `[error] scene N: unknown type`: fix the type name (the error lists the valid ones); `[warn]` lines name the file that was replaced by a fallback.
+- QA "element outside the safe band": move it with the scene's `pos`, shorten the copy, or accept it for non-text graphics (the warning is informational).
+- A logo shows a square box behind it: it is opaque with a non-uniform background; supply a transparent PNG (`logo_bg: keep` turns off the automatic corner removal).
 
 ## Engine
 

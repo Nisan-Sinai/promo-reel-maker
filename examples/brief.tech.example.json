@@ -1,0 +1,155 @@
+{
+ "out": "tech_promo.mp4",
+ "platform": "reels",
+ "format": "9x16",
+ "theme": {
+  "preset": "tech",
+  "type": "tech",
+  "bg_style": "tech",
+  "grade": "bright"
+ },
+ "brand": {
+  "name": "ניסן סיני טכנולוגיות",
+  "initials": "NS",
+  "phone": "058-7170978",
+  "website": "nisan-sinai-technologies.vercel.app",
+  "corner_logo": true
+ },
+ "scenes": [
+  {
+   "type": "kinetic",
+   "lines": [
+    "העסק שלך",
+    "עדיין רץ",
+    {
+     "text": "על אקסל",
+     "style": "accent",
+     "underline": false
+    },
+    {
+     "text": "ווואטסאפ?",
+     "style": "accent"
+    }
+   ],
+   "transition": "cut",
+   "dur": 2.5
+  },
+  {
+   "type": "kinetic",
+   "lines": [
+    {
+     "text": "יש דרך אחרת.",
+     "style": "small"
+    },
+    "טכנולוגיה",
+    {
+     "text": "שמסדרת את העסק.",
+     "style": "accent"
+    }
+   ],
+   "transition": "punch",
+   "start": 0.0,
+   "stagger": 0.13,
+   "dur": 2.0
+  },
+  {
+   "type": "logo",
+   "tagline": "אתרים, חנויות ומערכות לעסקים בכל הארץ",
+   "burst": true,
+   "tagline_size": 64,
+   "dur": 3.0
+  },
+  {
+   "type": "kinetic",
+   "lines": [
+    "אני בונה את",
+    {
+     "text": "הטכנולוגיה",
+     "style": "accent"
+    },
+    "שהעסק שלך צריך."
+   ],
+   "dur": 2.5
+  },
+  {
+   "type": "cards",
+   "kicker": "WEB · CRM · ERP · AUTOMATION",
+   "title": "מה אני בונה",
+   "cols": 2,
+   "items": [
+    {
+     "icon": "web",
+     "title": "אתרים וחנויות אונליין"
+    },
+    {
+     "icon": "people",
+     "title": "מערכות CRM"
+    },
+    {
+     "icon": "layers",
+     "title": "מערכות ERP וניהול"
+    },
+    {
+     "icon": "bolt",
+     "title": "אוטומציות ואינטגרציות"
+    },
+    {
+     "icon": "code",
+     "title": "מערכות Web בהתאמה אישית"
+    },
+    {
+     "icon": "chip",
+     "title": "AI לעסקים"
+    }
+   ],
+   "kicker_size": 42,
+   "dur": 5.0
+  },
+  {
+   "type": "device",
+   "device": "phone",
+   "ui": "crm",
+   "ui_title": "CRM",
+   "label": "מערכות CRM",
+   "icon": "people",
+   "title": "לקוחות ולידים במערכת אחת",
+   "note": "*המחשה",
+   "device_scale": 0.9,
+   "dur": 3.5
+  },
+  {
+   "type": "steps",
+   "title": "מהרעיון למערכת שעובדת.",
+   "per": 0.55,
+   "items": [
+    {
+     "title": "מבינים את העסק",
+     "size": 68
+    },
+    {
+     "title": "מתכננים את הפתרון",
+     "size": 68
+    },
+    {
+     "title": "בונים ובודקים",
+     "size": 68
+    },
+    {
+     "title": "עולים לאוויר",
+     "size": 68
+    }
+   ],
+   "dur": 5.0
+  },
+  {
+   "type": "cta",
+   "logo": true,
+   "eyebrow": "יש לך רעיון?",
+   "headline": "בואו נבנה משהו מעולה",
+   "button": "שלחו הודעה בוואטסאפ",
+   "eyebrow_size": 60,
+   "headline_size": 104,
+   "dur": 6.5
+  }
+ ]
+}

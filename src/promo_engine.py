@@ -5,12 +5,12 @@ Usage:
                           [--preview] [--frame SECONDS] [--draft] [--workers N]
 Needs: python3, numpy, Pillow (with raqm for RTL; else pip install python-bidi), ffmpeg.
 """
-import argparse, glob, hashlib, json, math, os, shutil, subprocess, sys, wave
+import argparse, glob, hashlib, json, math, os, re, shutil, subprocess, sys, wave
 from concurrent.futures import ProcessPoolExecutor
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, features
 
-VERSION = "1.0.1"
+VERSION = "3.0.0"
 FFMPEG = shutil.which("ffmpeg") or "ffmpeg"
 SR = 48000
 RAQM = features.check("raqm")
@@ -30,6 +30,7 @@ THEMES = {
     "electric": dict(bg="#06122A", primary="#3FE0FF", primary2="#1E5BFF", hi="#D8FAFF", accent="#FF3D71", text="#FFFFFF", muted="#BFD3F2", cta="#25D366"),
     "fresh":    dict(bg="#07140D", primary="#B9F23F", primary2="#22A85A", hi="#F0FFD0", accent="#FF5A36", text="#FFFFFF", muted="#CDE8D2", cta="#25D366"),
     "royal":    dict(bg="#140A26", primary="#FF77DD", primary2="#7B3FF2", hi="#FFE3F7", accent="#FFD166", text="#FFFFFF", muted="#E2D4F7", cta="#25D366"),
+    "tech":     dict(bg="#05070B", primary="#53E4FF", primary2="#8C6CFF", hi="#9AF1FF", accent="#D7C4A0", text="#F5F8FB", muted="#9AA7B7", cta="#25D366"),
     "clean":    dict(bg="#F3F5F9", primary="#1F6FEB", primary2="#0A3A8C", hi="#8FC2FF", accent="#E5484D", text="#0D1321", muted="#46536A", cta="#25D366"),
 }
 GF = "https://raw.githubusercontent.com/google/fonts/main/ofl/"
@@ -39,6 +40,8 @@ FONT_FILES = {
     "rubikdirt": "rubikdirt/RubikDirt-Regular.ttf", "suez": "suezone/SuezOne-Regular.ttf",
     "karantina": "karantina/Karantina-Bold.ttf", "fredoka": "fredoka/Fredoka[wdth,wght].ttf",
     "varela": "varelaround/VarelaRound-Regular.ttf",
+    "notosans": "notosanshebrew/NotoSansHebrew[wdth,wght].ttf", "geistmono": "geistmono/GeistMono[wght].ttf",
+    "geist": "geist/Geist[wght].ttf",
 }
 TYPESETS = {
     "bold":      dict(display=("rubik", 900), heavy=("heebo", 800), body=("heebo", 600), stamp=("rubikdirt", 0)),
@@ -47,7 +50,24 @@ TYPESETS = {
     "elegant":   dict(display=("frank", 900), heavy=("assistant", 800), body=("assistant", 600), stamp=("frank", 900)),
     "playful":   dict(display=("fredoka", 700), heavy=("fredoka", 600), body=("varela", 0), stamp=("rubikdirt", 0)),
     "retro":     dict(display=("suez", 0), heavy=("heebo", 800), body=("heebo", 600), stamp=("rubikdirt", 0)),
+    "tech":      dict(display=("notosans", 900), heavy=("notosans", 800), body=("notosans", 500), stamp=("rubikdirt", 0)),
 }
+for _t in TYPESETS.values():
+    _t.setdefault("mono", ("geistmono", 600))
+GRADES = {
+    "natural": {},
+    "bright": {"bright": 1.05, "contrast": 1.08, "sat": 1.12, "warm": 0.03},
+    "warm":   {"bright": 1.03, "contrast": 1.06, "sat": 1.10, "warm": 0.07},
+    "cool":   {"bright": 1.03, "contrast": 1.08, "sat": 1.08, "warm": -0.05},
+    "punchy": {"bright": 1.02, "contrast": 1.16, "sat": 1.25, "warm": 0.02},
+}
+# text-safe band (top, bottom) as a fraction of height; "reels" keeps clear of the Reels/TikTok UI
+SAFE = {"reels": (0.13, 0.76), "tiktok": (0.12, 0.74), "ads": (0.14, 0.65), "full": (0.06, 0.94)}
+# platform -> (format, safe band, recommended length in seconds)
+PLATFORMS = {"reels": ("9x16", "reels", (15, 30)), "tiktok": ("9x16", "tiktok", (15, 35)),
+             "shorts": ("9x16", "reels", (15, 45)), "stories": ("9x16", "reels", (5, 15)),
+             "ads": ("9x16", "ads", (6, 30)), "feed": ("4x5", "full", (10, 30)), "square": ("1x1", "full", (10, 30)),
+             "youtube": ("16x9", "full", (30, 120)), "promo": ("16x9", "full", (30, 90))}
 FONT_DIR = os.path.expanduser("~/.cache/promo_fonts")
 PHOTO_EXT = (".jpg", ".jpeg", ".png", ".webp", ".bmp")
 
@@ -128,18 +148,37 @@ def line_mask(text, f):
     return im
 
 
-def wrap_text(text, f, max_w):
+def _greedy(words, f, max_w):
+    out, cur = [], ""
+    for w in words:
+        cand = (cur + " " + w).strip()
+        if cur and f.getlength(_vis(cand), **_kw(cand)) > max_w:
+            out.append(cur)
+            cur = w
+        else:
+            cur = cand
+    out.append(cur)
+    return out
+
+
+def wrap_text(text, f, max_w, balance=True):
+    """Word wrap; with balance the paragraph keeps the greedy line count but the lines are evened out, so no
+    single word is left alone on the last line."""
     out = []
     for para in text.split("\n"):
-        words, cur = para.split(), ""
-        for w in words:
-            cand = (cur + " " + w).strip()
-            if cur and f.getlength(_vis(cand), **_kw(cand)) > max_w:
-                out.append(cur)
-                cur = w
-            else:
-                cur = cand
-        out.append(cur)
+        words = para.split()
+        lines = _greedy(words, f, max_w)
+        if balance and len(lines) > 1:
+            lo = max(f.getlength(_vis(w), **_kw(w)) for w in words)
+            hi = max_w
+            for _ in range(14):
+                mid = (lo + hi) / 2
+                if len(_greedy(words, f, mid)) <= len(lines):
+                    hi = mid
+                else:
+                    lo = mid
+            lines = _greedy(words, f, hi + 0.5)
+        out += lines
     return "\n".join(out)
 
 
@@ -202,8 +241,10 @@ class Ctx:
     def __init__(self, brief, fmt, draft=False):
         self.brief, self.fmt, self.draft = brief, fmt, draft
         W, H = FORMATS[fmt]
+        sc_ = float(brief.get("scale", 1))
+        W, H = int(W * sc_) // 2 * 2, int(H * sc_) // 2 * 2
         if draft:
-            W, H = W // 2, H // 2
+            W, H = W // 2 // 2 * 2, H // 2 // 2 * 2
         self.W, self.H, self.fps = W, H, int(brief.get("fps", 30))
         self.U = min(W, H) / 1080.0
         self.land = W > H
@@ -218,13 +259,20 @@ class Ctx:
         self.c = {k: hexrgb(v) for k, v in base.items()}
         self.light = sum(self.c["bg"]) > 380
         ts = dict(TYPESETS.get(th.get("type", "bold"), TYPESETS["bold"]))
-        for role in ("display", "heavy", "body", "stamp"):
+        for role in ("display", "heavy", "body", "stamp", "mono"):
             if th.get("font_" + role):
                 v = th["font_" + role]
                 ts[role] = (v, 0) if isinstance(v, str) else tuple(v)
         self.ts = ts
         self.grad = [self.c["hi"], self.c["primary"], self.c["primary2"]]
-        mt = {"9x16": (0.11, 0.80), "4x5": (0.07, 0.90), "1x1": (0.07, 0.93), "16x9": (0.08, 0.92)}[fmt]
+        plat = PLATFORMS.get(brief.get("platform", ""), (None, "reels", None))
+        mt = {"9x16": SAFE.get(brief.get("safe", plat[1]), SAFE["reels"]), "4x5": (0.07, 0.90), "1x1": (0.07, 0.93),
+              "16x9": (0.08, 0.92)}[fmt]
+        self.bg_style = th.get("bg_style", "grid")
+        self.drift = float(th.get("drift", 0.035 if self.bg_style != "grid" else 0.0))
+        self._pstatic = None
+        self.captions = []
+        self.grade = dict(GRADES.get(th.get("grade", "bright"), {}))
         self.top, self.bot = int(mt[0] * H), int(mt[1] * H)
         self.cy = (self.top + self.bot) // 2
         self.brand = brief.get("brand", {})
@@ -237,6 +285,8 @@ class Ctx:
     def T(self, text, role="body", size=60, color=None, grad=False, shadow=0.55, stroke=0, stroke_rgb=(0, 0, 0),
           max_w=None, glow=None, wrap=False):
         max_w = max_w or self.W * (0.62 if self.land else 0.88)
+        if role == "mono" and is_rtl(text):
+            role = "heavy"
         f = self.font(role, size)
         if wrap:
             text = wrap_text(str(text), f, max_w)
@@ -268,6 +318,56 @@ class Ctx:
             self._panel = np.clip(img * vig, 0, 255).astype(np.uint8)
         return self._panel
 
+    def panel_frame(self, T):
+        """Animated motion-graphics background (theme bg_style "tech"): drifting brand-colour glows, a fine grid,
+        floating particles and grain. Continuous across scenes because it is driven by global time T."""
+        if self.bg_style == "grid":
+            return self.panel()
+        W, H, U = self.W, self.H, self.U
+        if self._pstatic is None:
+            bg = np.array(self.c["bg"], np.float32)
+            yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
+            img = np.ones((H, W, 3), np.float32) * bg
+            step = max(8, int(72 * U))
+            grid = ((xx % step) < max(1, U * 1.2)) | ((yy % step) < max(1, U * 1.2))
+            fade = np.clip(1 - np.abs(yy / H - 0.5) * 1.6, 0.15, 1)
+            lc = np.array((255, 255, 255) if not self.light else (0, 0, 0), np.float32)
+            img[grid] = img[grid] * (1 - 0.045 * fade[grid][:, None]) + lc * 0.045 * fade[grid][:, None]
+            v = np.sqrt(((xx - W / 2) / (W / 2)) ** 2 + ((yy - H / 2) / (H / 2)) ** 2)
+            img *= np.clip(1 - np.clip(v - 0.6, 0, 1) * 0.6, 0, 1)[..., None]
+            img += np.random.default_rng(11).normal(0, 1.8, (H, W, 1)).astype(np.float32)
+            self._pstatic = img
+            sw, sh = max(8, W // 8), max(8, H // 8)
+            gy, gx = np.mgrid[0:sh, 0:sw].astype(np.float32)
+            self._g = (gx / sw, gy / sh)
+            rng = np.random.default_rng(5)
+            n = int(46 * (W * H) / (1080 * 1920)) + 12
+            self._parts = np.stack([rng.random(n), rng.random(n), rng.uniform(0.01, 0.035, n), rng.uniform(0.6, 1.6, n),
+                                    rng.uniform(0, 6.28, n)], 1)
+            r = max(3, int(9 * U))
+            yy2, xx2 = np.mgrid[-r:r + 1, -r:r + 1].astype(np.float32)
+            dot = np.exp(-(xx2 ** 2 + yy2 ** 2) / (r * r * 0.18))
+            spr = np.zeros((2 * r + 1, 2 * r + 1, 4), np.uint8)
+            spr[..., :3] = self.c["hi"]
+            spr[..., 3] = (dot * 255).astype(np.uint8)
+            self._dot = spr
+        gx, gy = self._g
+        c = self.c
+        g = np.zeros(gx.shape + (3,), np.float32)
+        for (bx, by, r, col, al) in ((0.2 + 0.18 * math.sin(T * 0.21), 0.22 + 0.1 * math.cos(T * 0.17), 0.5, c["primary"], 0.2),
+                                     (0.82 + 0.12 * math.cos(T * 0.16), 0.74 + 0.1 * math.sin(T * 0.19), 0.55, c["primary2"], 0.24),
+                                     (0.5 + 0.3 * math.sin(T * 0.11), 0.5 + 0.25 * math.cos(T * 0.13), 0.35, c["accent"], 0.06)):
+            d = (gx - bx) ** 2 + ((gy - by) * 0.56) ** 2
+            g += np.exp(-d / (r * r * 0.25))[..., None] * np.array(col, np.float32) * al
+        up = np.asarray(Image.fromarray(np.clip(g, 0, 255).astype(np.uint8)).resize((W, H), Image.BILINEAR), np.float32)
+        out = np.clip(self._pstatic + up, 0, 255).astype(np.uint8)
+        for (x0, y0, spd, sz, ph) in self._parts:
+            y = (y0 - spd * T) % 1.0
+            x = x0 + 0.012 * math.sin(T * 0.7 + ph)
+            a = 0.25 + 0.35 * (0.5 + 0.5 * math.sin(T * sz * 2 + ph))
+            over(out, self._dot, x * W, y * H, a)
+        return out
+
     def on_panel(self):
         return self.c["text"]
 
@@ -276,11 +376,37 @@ class Ctx:
             p = self.brand.get("logo")
             if p and os.path.exists(p):
                 im = Image.open(p).convert("RGBA")
+                if self.brand.get("logo_bg", "auto") == "auto":
+                    im = knock_out_corners(im)
                 bb = im.getchannel("A").getbbox()
                 self._logo = im.crop(bb) if bb else im
             else:
                 self._logo = auto_emblem(self)
         return self._logo
+
+
+def knock_out_corners(im, tol=14):
+    """Opaque logos (app icons, JPG exports) sit on a flat square. Make only that flat background - the region
+    connected to the four corners within `tol` of the corner colour - transparent; the logo pixels are untouched.
+    Skipped when the image already has transparency, the corners differ, or the region would be most of the image."""
+    a = np.asarray(im)
+    if a[..., 3].min() < 250:
+        return im
+    rgb = a[..., :3].astype(int)
+    h, w = rgb.shape[:2]
+    cs = [rgb[0, 0], rgb[0, w - 1], rgb[h - 1, 0], rgb[h - 1, w - 1]]
+    if max(np.abs(c - cs[0]).max() for c in cs) > tol:
+        return im
+    m = Image.fromarray(((np.abs(rgb - cs[0]).max(2) <= tol) * 255).astype(np.uint8)).copy()
+    for xy in ((0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)):
+        ImageDraw.floodfill(m, xy, 128)
+    bgm = np.asarray(m) == 128
+    if bgm.mean() > 0.45 or bgm.mean() < 0.002:
+        return im
+    al = Image.fromarray(np.where(bgm, 0, 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(0.7))
+    out = im.copy()
+    out.putalpha(al)
+    return out
 
 
 def theme_from_logo(path):
@@ -307,7 +433,7 @@ def theme_from_logo(path):
 
 def auto_emblem(ctx):
     name = ctx.brand.get("name", "")
-    ini = ctx.brand.get("initials") or "".join(w[0] for w in name.split()[:2]) or "\u2605"
+    ini = ctx.brand.get("initials") or "".join(w[0] for w in name.split()[:2]) or "★"
     S = int(300 * ctx.U)
     im = Image.new("RGBA", (S, S))
     d = ImageDraw.Draw(im)
@@ -367,7 +493,11 @@ def look_chain(look):
     if look.get("bw"):
         f.append("hue=s=0,eq=contrast=1.18")
     elif look.get("grade", True):
-        f.append("eq=contrast=1.06:saturation=1.18")
+        br = (float(look.get("bright", 1.0)) - 1.0) * 0.5
+        f.append(f"eq=contrast={look.get('contrast', 1.06)}:saturation={look.get('sat', 1.18)}:brightness={br:.3f}")
+        w = float(look.get("warm", 0))
+        if abs(w) > 0.001:
+            f.append(f"colorbalance=rm={w:.3f}:gm={w * 0.3:.3f}:bm={-w:.3f}")
     if look.get("blur"):
         f.append(f"gblur=sigma={look['blur']}")
     dim = look.get("dim", 1.0)
@@ -383,7 +513,15 @@ def pil_look(im, look):
     if look.get("bw"):
         im = ImageEnhance.Contrast(im.convert("L").convert("RGB")).enhance(1.18)
     elif look.get("grade", True):
-        im = ImageEnhance.Color(ImageEnhance.Contrast(im).enhance(1.06)).enhance(1.18)
+        im = ImageEnhance.Color(ImageEnhance.Contrast(im).enhance(look.get("contrast", 1.06))).enhance(look.get("sat", 1.18))
+        if abs(float(look.get("bright", 1.0)) - 1) > 0.001:
+            im = ImageEnhance.Brightness(im).enhance(float(look["bright"]))
+        w = float(look.get("warm", 0))
+        if abs(w) > 0.001:
+            r, g, b = im.split()
+            r = r.point(lambda v: min(255, int(v * (1 + w))))
+            b = b.point(lambda v: max(0, int(v * (1 - w))))
+            im = Image.merge("RGB", (r, g, b))
     if look.get("blur"):
         im = im.filter(ImageFilter.GaussianBlur(look["blur"]))
     dim = look.get("dim", 1.0)
@@ -392,8 +530,18 @@ def pil_look(im, look):
     return im
 
 
+def ease_move(p):
+    """Camera-move easing: mostly constant speed (so cuts land mid-move) with a soft start."""
+    return 0.75 * p + 0.25 * e_inout(p) if p < 1 else 1.0
+
+
+PHOTO_MOVES = ("push", "pull", "pan_left", "pan_right", "pan_up", "pan_down", "drift", "still")
+
+
 class Reader:
-    """Sequential frames of a clip/photo at WxH, starting t seconds into the scene."""
+    """Sequential frames of a clip/photo at WxH, starting t seconds into the scene.
+    Photos get a camera move (spec "move"): push | pull | pan_left | pan_right | pan_up | pan_down | drift | still | auto.
+    auto pans across wide photos in a tall frame (and vice versa) instead of cropping them, otherwise pushes in."""
 
     def __init__(self, spec, W, H, fps, n, t0=0.0, look=None, zoom=0.0, seed=0):
         self.spec, self.W, self.H, self.fps, self.n = spec, W, H, fps, n
@@ -402,16 +550,29 @@ class Reader:
         src = spec["src"]
         rng = np.random.default_rng(seed)
         if is_photo(src):
-            im = Image.open(src).convert("RGB")
             from PIL import ImageOps
-            im = ImageOps.exif_transpose(im)
-            s = 1.18
-            im = ImageOps.fit(im, (int(W * s), int(H * s)), Image.LANCZOS)
-            self.img = pil_look(im, self.look)
-            z = spec.get("kenburns", "in" if rng.random() < 0.6 else "out")
-            self.z0, self.z1 = (1.0, 1.12) if z == "in" else (1.12, 1.0)
+            im = ImageOps.exif_transpose(Image.open(src).convert("RGB"))
+            iw, ih = im.size
+            move = spec.get("move") or {"in": "push", "out": "pull"}.get(spec.get("kenburns"), "auto")
+            ar_i, ar_f = iw / ih, W / H
+            if move == "auto":
+                if ar_i > ar_f * 1.3:
+                    move = "pan_left" if rng.random() < 0.5 else "pan_right"
+                elif ar_i < ar_f / 1.3:
+                    move = "pan_down" if rng.random() < 0.5 else "pan_up"
+                else:
+                    move = "push" if rng.random() < 0.65 else "pull"
+            self.move = move
+            margin = 1.04 if move.startswith("pan") else 1.02
+            s = max(W / iw, H / ih) * margin
+            big = im.resize((max(W, round(iw * s)), max(H, round(ih * s))), Image.LANCZOS)
+            self.img = pil_look(big, self.look)
+            self.amt = float(spec.get("amount", 0.13))
+            self.focus = spec.get("focus", [0.5, 0.45])
+            self.speed = float(spec.get("pan_speed", 0.2))
+            self.dur = max(0.5, n / fps)
             ang = rng.uniform(0, 6.28)
-            self.pan = (math.cos(ang) * 0.04, math.sin(ang) * 0.04)
+            self.drift = (math.cos(ang), math.sin(ang))
         else:
             sw, sh, _ = probe(src)
             speed = float(spec.get("speed", 1.0))
@@ -429,19 +590,46 @@ class Reader:
             self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
             self.last = None
 
+    def _photo(self, p):
+        W, H = self.W, self.H
+        iw, ih = self.img.size
+        q = ease_move(p)
+        mv, amt = self.move, self.amt
+        z = 1.0
+        fx, fy = self.focus
+        cx, cy = iw * fx, ih * fy
+        if mv == "push":
+            z = 1 + amt * q
+        elif mv == "pull":
+            z = 1 + amt * (1 - q)
+        elif mv == "drift":
+            z = 1 + amt * 0.6
+        elif mv.startswith("pan"):
+            z = 1 + 0.035 * q
+            horiz = mv in ("pan_left", "pan_right")
+            span = (iw - W / z) if horiz else (ih - H / z)
+            travel = min(max(0.0, span), self.speed * (W if horiz else H) * self.dur)
+            d = (q - 0.5) * travel * (1 if mv in ("pan_right", "pan_down") else -1)
+            if horiz:
+                cx += d
+            else:
+                cy += d
+        cw, ch = W / z, H / z
+        if mv == "drift":
+            cx += self.drift[0] * (q - 0.5) * (iw - cw) * 0.8
+            cy += self.drift[1] * (q - 0.5) * (ih - ch) * 0.8
+        cx = min(max(cx, cw / 2), iw - cw / 2)
+        cy = min(max(cy, ch / 2), ih - ch / 2)
+        a = cw / W
+        fr = self.img.transform((W, H), Image.AFFINE, (a, 0, cx - cw / 2, 0, a, cy - ch / 2), Image.BICUBIC)
+        return np.array(fr)
+
     def next(self):
         W, H = self.W, self.H
         p = self.k / max(1, self.n - 1)
         self.k += 1
         if self.img is not None:
-            z = self.z0 + (self.z1 - self.z0) * p
-            iw, ih = self.img.size
-            cw, ch = W / z * (iw / (W * 1.18)), H / z * (ih / (H * 1.18))
-            cx = iw / 2 + self.pan[0] * iw * (p - 0.5)
-            cy = ih / 2 + self.pan[1] * ih * (p - 0.5)
-            a = cw / W
-            fr = self.img.transform((W, H), Image.AFFINE, (a, 0, cx - cw / 2, 0, a, cy - ch / 2), Image.BILINEAR)
-            return np.array(fr)
+            return self._photo(min(1.0, p))
         ew, eh = self.ew, self.eh
         buf = self.proc.stdout.read(ew * eh * 3)
         if len(buf) < ew * eh * 3:
@@ -763,6 +951,388 @@ def qr_image(ctx, data, size):
     return im
 
 
+# ----------------------------------------------------------------- v2 building blocks: icons, pills, boxed text, scrims
+def word_mask(text, f):
+    """Mask of one word on a shared baseline, so words of a line line up when placed one by one."""
+    t, kw = _vis(text), _kw(text)
+    l, tp, r, b = f.getbbox(t, anchor="ms", **kw)
+    asc, desc = f.getmetrics()
+    pad = 4
+    im = Image.new("L", (max(2, r - l + 2 * pad), asc + desc + 2 * pad))
+    ImageDraw.Draw(im).text((pad - l, pad + asc), t, font=f, fill=255, anchor="ms", **kw)
+    return im
+
+
+ICONS = ("pin", "people", "bed", "view", "waves", "star", "check", "home", "snow", "wifi", "parking", "sun", "heart",
+         "calendar", "chat", "key", "book", "kitchen", "sparkle", "pool", "coffee", "clock", "phone",
+         "web", "cart", "layers", "bolt", "gear", "code", "chip", "chart", "rocket", "search", "lock")
+
+
+def icon_mask(name, size):
+    S = max(8, int(size * 4))
+    m = Image.new("L", (S, S))
+    d = ImageDraw.Draw(m)
+    w = max(2, int(S * 0.085))
+    P = lambda x, y: (x * S, y * S)
+
+    def wave(y, amp=0.045, x0=0.08, x1=0.92):
+        pts = [P(x, y + amp * math.sin((x - x0) / (x1 - x0) * 4 * math.pi)) for x in np.linspace(x0, x1, 40)]
+        d.line(pts, fill=255, width=w, joint="curve")
+    if name == "pin":
+        r = S * 0.3
+        cx, cy = S / 2, S * 0.38
+        d.ellipse((cx - r, cy - r, cx + r, cy + r), fill=255)
+        d.polygon([(cx - r * 0.87, cy + r * 0.5), (cx + r * 0.87, cy + r * 0.5), (cx, S * 0.95)], fill=255)
+        rr = r * 0.42
+        d.ellipse((cx - rr, cy - rr, cx + rr, cy + rr), fill=0)
+    elif name == "people":
+        for x, k, col in ((0.34, 0.82, 255), (0.62, 1.0, 0), (0.62, 1.0, 255)):
+            g = 0.035 if col == 0 else 0
+            r = S * (0.12 * k + g)
+            d.ellipse((S * x - r, S * 0.3 - r, S * x + r, S * 0.3 + r), fill=col)
+            bw = S * (0.24 * k + g)
+            d.pieslice((S * x - bw, S * 0.5 - g * S, S * x + bw, S * (0.5 + 0.5 * k) + bw * 0.6), 180, 360, fill=col)
+    elif name == "bed":
+        d.rounded_rectangle((*P(0.08, 0.28), *P(0.17, 0.86)), int(S * 0.03), fill=255)
+        d.rectangle((*P(0.08, 0.6), *P(0.92, 0.74)), fill=255)
+        d.rectangle((*P(0.84, 0.6), *P(0.92, 0.86)), fill=255)
+        d.rounded_rectangle((*P(0.21, 0.45), *P(0.4, 0.57)), int(S * 0.04), fill=255)
+        d.rounded_rectangle((*P(0.43, 0.43), *P(0.92, 0.57)), int(S * 0.04), fill=255)
+    elif name == "view":
+        d.polygon([P(0.04, 0.6), P(0.34, 0.2), P(0.52, 0.44), P(0.66, 0.3), P(0.96, 0.6)], fill=255)
+        wave(0.72)
+        wave(0.86)
+    elif name == "waves" or name == "pool":
+        for y in (0.38, 0.58, 0.78):
+            wave(y)
+        if name == "pool":
+            m2 = Image.new("L", (S, S))
+            d2 = ImageDraw.Draw(m2)
+            for x in (0.3, 0.55):
+                d2.line([P(x, 0.08), P(x, 0.5)], fill=255, width=w)
+            for y in (0.18, 0.32):
+                d2.line([P(0.3, y), P(0.55, y)], fill=255, width=w)
+            m.paste(255, (0, 0), m2)
+    elif name in ("star", "sparkle"):
+        pts = []
+        n = 5 if name == "star" else 4
+        for i in range(n * 2):
+            a = -math.pi / 2 + i * math.pi / n
+            r = 0.46 if i % 2 == 0 else (0.2 if name == "star" else 0.12)
+            pts.append(P(0.5 + r * math.cos(a), 0.52 + r * math.sin(a)))
+        d.polygon(pts, fill=255)
+    elif name == "check":
+        d.ellipse((*P(0.06, 0.06), *P(0.94, 0.94)), outline=255, width=w)
+        d.line([P(0.28, 0.52), P(0.44, 0.67), P(0.73, 0.36)], fill=255, width=int(w * 1.3), joint="curve")
+    elif name == "home":
+        d.polygon([P(0.5, 0.1), P(0.94, 0.48), P(0.82, 0.48), P(0.82, 0.9), P(0.18, 0.9), P(0.18, 0.48), P(0.06, 0.48)], fill=255)
+        d.rectangle((*P(0.42, 0.62), *P(0.58, 0.9)), fill=0)
+    elif name == "snow":
+        for a in (0, 60, 120):
+            r = math.radians(a)
+            dx, dy = 0.42 * math.cos(r), 0.42 * math.sin(r)
+            d.line([P(0.5 - dx, 0.5 - dy), P(0.5 + dx, 0.5 + dy)], fill=255, width=w)
+            for sgn in (1, -1):
+                bx, by = 0.5 + sgn * dx * 0.62, 0.5 + sgn * dy * 0.62
+                for off in (0.5, -0.5):
+                    rr = r + off * (1 if sgn > 0 else -1) + (math.pi if sgn < 0 else 0)
+                    d.line([P(bx, by), P(bx + 0.14 * math.cos(rr + math.pi), by + 0.14 * math.sin(rr + math.pi))], fill=255, width=w)
+    elif name == "wifi":
+        for r in (0.42, 0.29, 0.16):
+            d.arc((*P(0.5 - r, 0.78 - r), *P(0.5 + r, 0.78 + r)), 225, 315, fill=255, width=w)
+        d.ellipse((*P(0.44, 0.72), *P(0.56, 0.84)), fill=255)
+    elif name == "parking":
+        d.rounded_rectangle((*P(0.08, 0.08), *P(0.92, 0.92)), int(S * 0.18), outline=255, width=w)
+        try:
+            fP = ImageFont.truetype("DejaVuSans-Bold.ttf", int(S * 0.62))
+            d.text(P(0.5, 0.52), "P", font=fP, fill=255, anchor="mm")
+        except Exception:
+            pass
+    elif name == "sun":
+        d.ellipse((*P(0.31, 0.31), *P(0.69, 0.69)), fill=255)
+        for i in range(8):
+            a = i * math.pi / 4
+            d.line([P(0.5 + 0.28 * math.cos(a), 0.5 + 0.28 * math.sin(a)), P(0.5 + 0.44 * math.cos(a), 0.5 + 0.44 * math.sin(a))],
+                   fill=255, width=w)
+    elif name == "heart":
+        d.ellipse((*P(0.08, 0.14), *P(0.52, 0.56)), fill=255)
+        d.ellipse((*P(0.48, 0.14), *P(0.92, 0.56)), fill=255)
+        d.polygon([P(0.1, 0.44), P(0.9, 0.44), P(0.5, 0.9)], fill=255)
+    elif name == "calendar":
+        d.rounded_rectangle((*P(0.08, 0.16), *P(0.92, 0.92)), int(S * 0.1), outline=255, width=w)
+        d.rectangle((*P(0.08, 0.2), *P(0.92, 0.38)), fill=255)
+        for x in (0.3, 0.7):
+            d.line([P(x, 0.06), P(x, 0.26)], fill=255, width=w)
+        for i in range(3):
+            for j in range(2):
+                d.rectangle((*P(0.22 + i * 0.22, 0.5 + j * 0.18), *P(0.34 + i * 0.22, 0.6 + j * 0.18)), fill=255)
+    elif name in ("chat", "phone"):
+        d.rounded_rectangle((*P(0.06, 0.1), *P(0.94, 0.72)), int(S * 0.2), fill=255)
+        d.polygon([P(0.2, 0.62), P(0.42, 0.68), P(0.16, 0.92)], fill=255)
+        for x in (0.32, 0.5, 0.68):
+            d.ellipse((*P(x - 0.06, 0.35), *P(x + 0.06, 0.47)), fill=0)
+    elif name == "key":
+        d.ellipse((*P(0.06, 0.28), *P(0.46, 0.68)), fill=255)
+        d.ellipse((*P(0.17, 0.39), *P(0.35, 0.57)), fill=0)
+        d.rectangle((*P(0.42, 0.43), *P(0.94, 0.53)), fill=255)
+        d.rectangle((*P(0.72, 0.53), *P(0.8, 0.68)), fill=255)
+        d.rectangle((*P(0.85, 0.53), *P(0.93, 0.64)), fill=255)
+    elif name == "book":
+        d.polygon([P(0.06, 0.2), P(0.47, 0.28), P(0.47, 0.88), P(0.06, 0.8)], fill=255)
+        d.polygon([P(0.94, 0.2), P(0.53, 0.28), P(0.53, 0.88), P(0.94, 0.8)], fill=255)
+    elif name == "kitchen":
+        d.rounded_rectangle((*P(0.16, 0.42), *P(0.84, 0.88)), int(S * 0.08), fill=255)
+        d.rectangle((*P(0.1, 0.36), *P(0.9, 0.44)), fill=255)
+        d.rectangle((*P(0.04, 0.5), *P(0.18, 0.58)), fill=255)
+        d.rectangle((*P(0.82, 0.5), *P(0.96, 0.58)), fill=255)
+        for x in (0.36, 0.5, 0.64):
+            d.line([P(x, 0.08), P(x + 0.03, 0.18), P(x, 0.28)], fill=255, width=int(w * 0.7))
+    elif name == "coffee":
+        d.rounded_rectangle((*P(0.12, 0.38), *P(0.7, 0.9)), int(S * 0.1), fill=255)
+        d.arc((*P(0.58, 0.46), *P(0.92, 0.76)), 270, 90, fill=255, width=w)
+        for x in (0.28, 0.42, 0.56):
+            d.line([P(x, 0.08), P(x + 0.03, 0.18), P(x, 0.3)], fill=255, width=int(w * 0.7))
+    elif name == "clock":
+        d.ellipse((*P(0.06, 0.06), *P(0.94, 0.94)), outline=255, width=w)
+        d.line([P(0.5, 0.5), P(0.5, 0.24)], fill=255, width=w)
+        d.line([P(0.5, 0.5), P(0.7, 0.6)], fill=255, width=w)
+    elif name == "web":
+        d.rounded_rectangle((*P(0.06, 0.14), *P(0.94, 0.86)), int(S * 0.1), outline=255, width=w)
+        d.rectangle((*P(0.06, 0.16), *P(0.94, 0.34)), fill=255)
+        for x in (0.16, 0.26, 0.36):
+            d.ellipse((*P(x - 0.035, 0.215), *P(x + 0.035, 0.285)), fill=0)
+        d.rounded_rectangle((*P(0.18, 0.46), *P(0.48, 0.74)), int(S * 0.03), fill=255)
+        for y in (0.48, 0.6, 0.72):
+            d.line([P(0.56, y), P(0.82, y)], fill=255, width=int(w * 0.8))
+    elif name == "cart":
+        d.line([P(0.04, 0.16), P(0.18, 0.16), P(0.3, 0.64), P(0.82, 0.64), P(0.92, 0.3), P(0.24, 0.3)], fill=255, width=w, joint="curve")
+        for x in (0.36, 0.74):
+            d.ellipse((*P(x - 0.08, 0.74), *P(x + 0.08, 0.9)), fill=255)
+    elif name == "layers":
+        for k, y in enumerate((0.62, 0.46, 0.3)):
+            pts = [P(0.5, y - 0.2), P(0.94, y), P(0.5, y + 0.2), P(0.06, y)]
+            if k < 2:
+                d.polygon(pts, outline=255, width=w)
+            else:
+                d.polygon(pts, fill=255)
+    elif name == "bolt":
+        d.polygon([P(0.6, 0.04), P(0.16, 0.56), P(0.46, 0.56), P(0.38, 0.96), P(0.84, 0.42), P(0.54, 0.42)], fill=255)
+    elif name == "gear":
+        for i in range(8):
+            a = i * math.pi / 4
+            cx, cy = 0.5 + 0.36 * math.cos(a), 0.5 + 0.36 * math.sin(a)
+            d.rounded_rectangle((*P(cx - 0.09, cy - 0.09), *P(cx + 0.09, cy + 0.09)), int(S * 0.025), fill=255)
+        d.ellipse((*P(0.17, 0.17), *P(0.83, 0.83)), fill=255)
+        d.ellipse((*P(0.37, 0.37), *P(0.63, 0.63)), fill=0)
+    elif name == "code":
+        d.line([P(0.3, 0.24), P(0.08, 0.5), P(0.3, 0.76)], fill=255, width=int(w * 1.2), joint="curve")
+        d.line([P(0.7, 0.24), P(0.92, 0.5), P(0.7, 0.76)], fill=255, width=int(w * 1.2), joint="curve")
+        d.line([P(0.58, 0.14), P(0.42, 0.86)], fill=255, width=int(w * 1.1))
+    elif name == "chip":
+        d.rounded_rectangle((*P(0.22, 0.22), *P(0.78, 0.78)), int(S * 0.08), outline=255, width=w)
+        d.rounded_rectangle((*P(0.36, 0.36), *P(0.64, 0.64)), int(S * 0.04), fill=255)
+        for t in (0.34, 0.5, 0.66):
+            for a, b in (((t, 0.04), (t, 0.2)), ((t, 0.8), (t, 0.96)), ((0.04, t), (0.2, t)), ((0.8, t), (0.96, t))):
+                d.line([P(*a), P(*b)], fill=255, width=int(w * 0.8))
+    elif name == "chart":
+        for i, hgt in enumerate((0.3, 0.52, 0.42, 0.7)):
+            x = 0.1 + i * 0.21
+            d.rounded_rectangle((*P(x, 0.9 - hgt), *P(x + 0.14, 0.9)), int(S * 0.03), fill=255)
+        d.line([P(0.06, 0.94), P(0.94, 0.94)], fill=255, width=int(w * 0.8))
+    elif name == "rocket":
+        d.polygon([P(0.5, 0.04), P(0.68, 0.3), P(0.68, 0.68), P(0.32, 0.68), P(0.32, 0.3)], fill=255)
+        d.ellipse((*P(0.42, 0.28), *P(0.58, 0.44)), fill=0)
+        d.polygon([P(0.32, 0.46), P(0.14, 0.72), P(0.32, 0.66)], fill=255)
+        d.polygon([P(0.68, 0.46), P(0.86, 0.72), P(0.68, 0.66)], fill=255)
+        d.polygon([P(0.4, 0.72), P(0.6, 0.72), P(0.5, 0.96)], fill=255)
+    elif name == "search":
+        d.ellipse((*P(0.08, 0.08), *P(0.64, 0.64)), outline=255, width=int(w * 1.15))
+        d.line([P(0.58, 0.58), P(0.9, 0.9)], fill=255, width=int(w * 1.6))
+    elif name == "lock":
+        d.rounded_rectangle((*P(0.16, 0.44), *P(0.84, 0.92)), int(S * 0.08), fill=255)
+        d.arc((*P(0.28, 0.1), *P(0.72, 0.62)), 180, 360, fill=255, width=w)
+        d.line([P(0.28, 0.36), P(0.28, 0.46)], fill=255, width=w)
+        d.line([P(0.72, 0.36), P(0.72, 0.46)], fill=255, width=w)
+        d.ellipse((*P(0.44, 0.58), *P(0.56, 0.7)), fill=0)
+    return m.resize((max(1, int(size)), max(1, int(size))), Image.LANCZOS)
+
+
+def icon_img(name, size, color):
+    m = icon_mask(name, size)
+    im = Image.new("RGBA", m.size, tuple(color[:3]) + (0,))
+    im.putalpha(m)
+    return im
+
+
+def ink_for(rgb):
+    return (20, 18, 16) if (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]) > 150 else (255, 255, 255)
+
+
+def pill(ctx, text, icon=None, size=46, bg=(255, 255, 255, 240), fg=None, icon_bg=None):
+    """Rounded label with an optional icon disc - for locations and feature tags."""
+    U = ctx.U
+    fg = fg or ink_for(bg)
+    m = line_mask(text, ctx.font("heavy", size))
+    h = int(m.height + 30 * U)
+    ic = int(h * 0.76) if icon else 0
+    padx, gap = int(26 * U), (int(12 * U) if icon else 0)
+    w = m.width + 2 * padx + ic + gap - (int(14 * U) if icon else 0)
+    im = Image.new("RGBA", (w, h))
+    ImageDraw.Draw(im).rounded_rectangle((0, 0, w - 1, h - 1), h // 2, fill=tuple(bg))
+    rtl = is_rtl(text)
+    if icon:
+        icb = icon_bg or ctx.c["primary"]
+        icx = w - int(8 * U) - ic if rtl else int(8 * U)
+        disc = Image.new("RGBA", (ic, ic))
+        ImageDraw.Draw(disc).ellipse((0, 0, ic - 1, ic - 1), fill=tuple(icb) + (255,))
+        g = icon_img(icon, int(ic * 0.58), ink_for(icb))
+        disc.alpha_composite(g, ((ic - g.width) // 2, (ic - g.height) // 2))
+        im.alpha_composite(disc, (icx, (h - ic) // 2))
+        tx = icx - gap - m.width if rtl else icx + ic + gap
+    else:
+        tx = padx
+    lay = Image.new("RGBA", m.size, tuple(fg) + (0,))
+    lay.putalpha(m)
+    im.alpha_composite(lay, (int(tx), (h - m.height) // 2))
+    return finish(im, im.getchannel("A"), 0.45, U=U)
+
+
+def boxed(ctx, text, size=110, role="display", bg=None, fg=None, max_w=None):
+    """Text on solid rounded boxes, one per line (short-form caption style): readable on any photo."""
+    U = ctx.U
+    bg = tuple(bg or ctx.c["primary"])
+    fg = tuple(fg or ink_for(bg))
+    max_w = max_w or ctx.W * (0.6 if ctx.land else 0.88)
+    padx, pady = int(size * 0.3 * U), int(size * 0.1 * U)
+    f = ctx.font(role, size)
+    text = wrap_text(str(text), f, max_w - 2 * padx)
+    lines = [line_mask(l, f) for l in text.split("\n") if l.strip()]
+    wmax = max(m.width for m in lines) + 2 * padx
+    if wmax > max_w:
+        f = ctx.font(role, size * max_w / wmax * 0.98)
+        lines = [line_mask(l, f) for l in text.split("\n") if l.strip()]
+    gap = int(8 * U)
+    boxes = [(m.width + 2 * padx, m.height + 2 * pady) for m in lines]
+    W_ = max(b[0] for b in boxes)
+    H_ = sum(b[1] for b in boxes) + gap * (len(boxes) - 1)
+    im = Image.new("RGBA", (W_, H_))
+    d = ImageDraw.Draw(im)
+    y = 0
+    for m, (bw, bh) in zip(lines, boxes):
+        x = (W_ - bw) // 2
+        d.rounded_rectangle((x, y, x + bw - 1, y + bh - 1), int(min(bh * 0.28, 30 * U)), fill=bg + (255,))
+        lay = Image.new("RGBA", m.size, fg + (0,))
+        lay.putalpha(m)
+        im.alpha_composite(lay, (x + padx, y + pady))
+        y += bh + gap
+    return finish(im, im.getchannel("A"), 0.4, U=U)
+
+
+def scrim_el(ctx, where="bottom", strength=0.6, frac=0.5, t0=0.0):
+    """Soft dark gradient behind text so the footage itself stays bright (no full-frame dimming)."""
+    H, W = ctx.H, ctx.W
+    y = np.linspace(0, 1, H)
+    if where == "bottom":
+        a = np.clip((y - (1 - frac)) / frac, 0, 1) ** 1.3
+    elif where == "top":
+        a = np.clip((frac - y) / frac, 0, 1) ** 1.3
+    else:
+        a = np.exp(-((y - 0.5) / max(0.05, frac / 2)) ** 2)
+    a = a * strength
+    rows = np.nonzero(a > 0.004)[0]
+    if not len(rows):
+        return Fn(lambda out, t, bgf: None)
+    y0, y1 = int(rows[0]), int(rows[-1]) + 1
+    arr = np.zeros((y1 - y0, W, 4), np.uint8)
+    arr[..., 3] = (a[y0:y1, None] * 255).astype(np.uint8)
+    return Fn(lambda out, t, bgf: over(out, arr, 0, y0, clamp((t - t0) / 0.25 + 0.4)))
+
+
+def word_sprites(ctx, text, cx, cy, t0, role="display", size=120, grad=True, color=(255, 255, 255), max_w=None,
+                 stagger=0.08, anim="pop", d=0.3, shadow=0.7, highlight=()):
+    """One sprite per word (RTL aware, shared baseline) for word-by-word reveals. Returns (sprites, height)."""
+    U = ctx.U
+    max_w = max_w or ctx.W * (0.6 if ctx.land else 0.88)
+    f = ctx.font(role, size)
+    words = str(text).split()
+    masks = [word_mask(w, f) for w in words]
+    if masks and max(m.width for m in masks) > max_w:
+        f = ctx.font(role, size * max_w / max(m.width for m in masks) * 0.97)
+        masks = [word_mask(w, f) for w in words]
+    sp = f.getlength(" ")
+    total = sum(m.width for m in masks) + sp * max(0, len(masks) - 1)
+    nl = max(1, math.ceil(total / max_w))
+    target = min(max_w, total / nl * 1.12 + sp)
+    lines, cur, cw = [], [], 0
+    for w, m in zip(words, masks):
+        if cur and cw + sp + m.width > target:
+            lines.append(cur)
+            cur, cw = [], 0
+        cur.append((w, m))
+        cw += (sp if cw else 0) + m.width
+    if cur:
+        lines.append(cur)
+    lh = max(m.height for m in masks) * 0.92 if masks else 0
+    tot = lh * len(lines)
+    rtl = is_rtl(text)
+    out, i = [], 0
+    y = cy - tot / 2 + lh / 2
+    for ln in lines:
+        lw = sum(m.width for _, m in ln) + sp * (len(ln) - 1)
+        x = cx + lw / 2 if rtl else cx - lw / 2
+        for w, m in ln:
+            g = grad or any(h and h in w for h in highlight)
+            fill = gradient_fill(m, ctx.grad if g is True else g) if g else Image.new("RGBA", m.size, tuple(color) + (0,))
+            if not g:
+                fill.putalpha(m)
+            img = finish(fill, m, shadow, U=U)
+            wcx = x - m.width / 2 if rtl else x + m.width / 2
+            out.append(Sprite(img, wcx, y, t0 + stagger * i, anim, d))
+            x = x - m.width - sp if rtl else x + m.width + sp
+            i += 1
+        y += lh
+    return out, tot
+
+
+def glass_row(ctx, text, icon, width=None, size=56):
+    U = ctx.U
+    m = word_mask(text, ctx.font("heavy", size))
+    h = int(m.height + 30 * U)
+    ic = int(h * 0.72)
+    w = int(width or (m.width + ic + 90 * U))
+    im = Image.new("RGBA", (w, h))
+    d = ImageDraw.Draw(im)
+    d.rounded_rectangle((0, 0, w - 1, h - 1), int(26 * U), fill=(12, 14, 18, 196), outline=(255, 255, 255, 46),
+                        width=max(1, int(2 * U)))
+    rtl = is_rtl(text)
+    icx = w - int(16 * U) - ic if rtl else int(16 * U)
+    disc = Image.new("RGBA", (ic, ic))
+    ImageDraw.Draw(disc).ellipse((0, 0, ic - 1, ic - 1), fill=ctx.c["primary"] + (255,))
+    g = icon_img(icon or "check", int(ic * 0.58), ink_for(ctx.c["primary"]))
+    disc.alpha_composite(g, ((ic - g.width) // 2, (ic - g.height) // 2))
+    im.alpha_composite(disc, (icx, (h - ic) // 2))
+    lay = Image.new("RGBA", m.size, (255, 255, 255, 0))
+    lay.putalpha(m)
+    tx = icx - int(22 * U) - m.width if rtl else icx + ic + int(22 * U)
+    im.alpha_composite(lay, (int(tx), (h - m.height) // 2))
+    return finish(im, im.getchannel("A"), 0.5, U=U)
+
+
+def place_block(ctx, items, where, gaps):
+    """Stack images in the text-safe band: where = bottom | top | center. Returns [(img, cy)]."""
+    items = [i for i in items if i is not None]
+    if not items:
+        return []
+    tot = sum(i.height for i in items) + sum(gaps[:len(items) - 1])
+    if where == "bottom":
+        cy = ctx.bot - tot / 2
+    elif where == "top":
+        cy = ctx.top + tot / 2
+    else:
+        cy = ctx.cy
+    return stack(items, cy, ctx.bot - ctx.top, gaps)
+
+
 # ----------------------------------------------------------------- scene builders
 def clip_bg(sc, look, zoom=0.05):
     c = sc.get("clip")
@@ -782,7 +1352,17 @@ def b_hook(sc, ctx):
     U, W = ctx.U, ctx.W
     big, small = sc.get("big", ""), sc.get("small")
     video_text = sc.get("clip") and sc.get("style", "video") == "video"
-    els, sfx = [], [(0.04, "impact", 0.9)]
+    els, sfx = [], [(0.04, "impact", float(sc.get("impact", 0.9)))]
+    if sc.get("style") == "box":
+        bg = clip_bg(sc, {}, 0.1) if sc.get("clip") else {"kind": "panel"}
+        els.append(scrim_el(ctx, "center", sc.get("scrim", 0.4), 0.6))
+        sm = pill(ctx, small, sc.get("icon"), 50) if small else None
+        bx = boxed(ctx, big, sc.get("size", 132))
+        lay = place_block(ctx, [sm, bx], sc.get("pos", "center"), [int(-8 * U)])
+        if sm:
+            els.append(Sprite(lay[0][0], W / 2, lay[0][1], 0.0, "down", 0.28))
+        els.append(Sprite(lay[-1][0], W / 2, lay[-1][1], 0.06, sc.get("anim", "pop"), 0.34))
+        return bg, els, sfx
     if video_text:
         bg = {"kind": "clip", "clip": sc["clip"], "look": {"grade": True, "vignette": False}, "zoom": 0.08, "hide": True}
         f = ctx.font("display", sc.get("size", 250 if not ctx.land else 210))
@@ -870,7 +1450,7 @@ def b_logo(sc, ctx):
     lg = finish(lg, lg.getchannel("A"), 0.5, U=U)
     name = ctx.T(sc.get("name", ctx.brand.get("name", "")), "display", 120, grad=True) if (sc.get("name") or ctx.brand.get("name")) else None
     tag = sc.get("tagline", ctx.brand.get("tagline"))
-    tg = ctx.T(tag, "body", 56, color=fg_for(ctx, bg)) if tag else None
+    tg = ctx.T(tag, "body", sc.get("tagline_size", 56), color=fg_for(ctx, bg)) if tag else None
     lay = stack([lg, name, tg], ctx.cy, ctx.bot - ctx.top, [int(30 * U), int(4 * U)])
     els = [Sprite(lay[0][0], W / 2, lay[0][1], 0.05, "zoom", 0.5)]
     la = np.asarray(lay[0][0])[..., 3].astype(np.float32) / 255.0
@@ -890,6 +1470,8 @@ def b_logo(sc, ctx):
         rgba[..., 3] = (band * 255).astype(np.uint8)
         over(out, rgba, lcx - lw / 2, lcy - lh / 2)
     els.append(Fn(shine))
+    if sc.get("burst", ctx.bg_style != "grid"):
+        els.insert(0, burst_fx(ctx, W / 2, lay[0][1], 0.12))
     i = 1
     if name:
         els.append(Sprite(lay[i][0], W / 2, lay[i][1], 0.35, "up")); i += 1
@@ -931,7 +1513,7 @@ def b_collage(sc, ctx):
     for i, c in enumerate(clips[:cols * rows]):
         r_, k_ = divmod(i, cols)
         im = grab_still(c, int(cw), int(ch), 0.5).convert("RGBA")
-        im = pil_look(im.convert("RGB"), {"grade": True}).convert("RGBA")
+        im = pil_look(im.convert("RGB"), dict(ctx.grade, grade=True)).convert("RGBA")
         im.putalpha(rounded_mask(im.width, im.height, rr))
         x = W - m - (k_ + 1) * cw - k_ * g + cw / 2
         y = m + r_ * (ch + g) + ch / 2
@@ -1013,7 +1595,7 @@ class CardClip:
     def draw(self, out, t, ctx, bgf=None):
         if self.reader is None:
             self.reader = Reader(self.spec, self.w, self.h, ctx.fps, self.n, t0=max(0, t),
-                                 look={"grade": True, "vignette": False}, zoom=0.04)
+                                 look=dict(ctx.grade, grade=True, vignette=False), zoom=0.04)
         fr = self.reader.next()
         if t < self.t0:
             return
@@ -1104,7 +1686,7 @@ def b_testimonial(sc, ctx):
     d = ImageDraw.Draw(card)
     d.rounded_rectangle((0, 0, cw - 1, ch - 1), int(36 * U), fill=(12, 12, 14, 205), outline=ctx.c["primary"] + (140,),
                         width=max(2, int(3 * U)))
-    qm = ctx.T("\u201D", "display", 220, grad=True, shadow=0)
+    qm = ctx.T("”", "display", 220, grad=True, shadow=0)
     card = finish(card, card.getchannel("A"), 0.5, U=U)
     els = [Sprite(card, W / 2, ctx.cy, 0.0, "up", 0.4)]
     top = ctx.cy - ch / 2
@@ -1211,7 +1793,7 @@ def b_text(sc, ctx):
 
 def b_cta(sc, ctx):
     U, W = ctx.U, ctx.W
-    bg = clip_bg(sc, {"dim": 0.42, "blur": 18}, 0.05)
+    bg = clip_bg(sc, {"dim": 0.5, "blur": 12}, 0.05)
     fg = fg_for(ctx, bg)
     br = ctx.brand
     lg = None
@@ -1221,8 +1803,8 @@ def b_cta(sc, ctx):
         f = min(mw / lg.width, mh / lg.height)
         lg = lg.resize((max(1, int(lg.width * f)), max(1, int(lg.height * f))), Image.LANCZOS)
         lg = finish(lg, lg.getchannel("A"), 0.5, U=U)
-    eb = ctx.T(sc["eyebrow"], "heavy", 46, grad=True) if sc.get("eyebrow") else None
-    hl = ctx.T(sc.get("headline", "לפרטים נוספים"), "heavy", 92, color=fg, wrap=True)
+    eb = ctx.T(sc["eyebrow"], "heavy", sc.get("eyebrow_size", 46), grad=True) if sc.get("eyebrow") else None
+    hl = ctx.T(sc.get("headline", "לפרטים נוספים"), "heavy", sc.get("headline_size", 92), color=fg, wrap=True)
     bt = button(ctx, sc.get("button", "שלחו הודעה בוואטסאפ")) if sc.get("button", True) else None
     ph = ctx.T(sc.get("phone", br.get("phone", "")), "display", 116, grad=True) if (sc.get("phone") or br.get("phone")) else None
     web = ctx.T(sc.get("website", br.get("website")), "body", 44, color=fg) if (sc.get("website") or br.get("website")) else None
@@ -1276,16 +1858,631 @@ def b_cta(sc, ctx):
     return bg, els, sfx
 
 
+def b_showcase(sc, ctx):
+    """Bright full-frame footage + label pill + headline + sub in the safe band. The v2 workhorse scene."""
+    U, W = ctx.U, ctx.W
+    bg = clip_bg(sc, {}, sc.get("zoom", 0.05))
+    where, style = sc.get("pos", "bottom"), sc.get("style", "box")
+    els, sfx = [], []
+    sc_strength = sc.get("scrim", 0.42 if style == "box" else 0.62)
+    if sc_strength:
+        els.append(scrim_el(ctx, where if where != "center" else "center", sc_strength, 0.5 if where != "center" else 0.5))
+    label = pill(ctx, sc["label"], sc.get("icon"), sc.get("label_size", 52)) if sc.get("label") else None
+    title_img, words = None, None
+    tsize = sc.get("size", 108 if style == "box" else 128)
+    if sc.get("title"):
+        if style == "box":
+            title_img = boxed(ctx, sc["title"], tsize, bg=sc.get("box_color") and hexrgb(sc["box_color"]))
+        else:
+            words = sc["title"]
+            title_img = Image.new("RGBA", (10, int(word_sprites(ctx, words, 0, 0, 0, size=tsize)[1] + 20 * U)))
+    sub = ctx.T(sc["sub"], "heavy", sc.get("sub_size", 54), color=(255, 255, 255), wrap=True, shadow=0.85) if sc.get("sub") else None
+    lay = place_block(ctx, [label, title_img, sub], where, [int(-10 * U), int(-12 * U)])
+    i = 0
+    if label:
+        els.append(Sprite(lay[0][0], W / 2, lay[0][1], 0.06, "right" if is_rtl(sc["label"]) else "left", 0.32))
+        sfx.append((0.08, "pop", 0.45))
+        i = 1
+    if title_img is not None:
+        cy = lay[i][1]
+        if words:
+            sp, _ = word_sprites(ctx, words, W / 2, cy, 0.16, size=tsize, grad=sc.get("grad", False),
+                                 anim=sc.get("anim", "pop"), stagger=sc.get("stagger", 0.08),
+                                 highlight=sc.get("highlight", ()), shadow=0.85)
+            els += sp
+        else:
+            els.append(Sprite(lay[i][0], W / 2, cy, 0.14, sc.get("anim", "wipe"), 0.36))
+        i += 1
+    if sub:
+        els.append(Sprite(lay[i][0], W / 2, lay[i][1], 0.42, "up"))
+    return bg, els, sfx
+
+
+def b_features(sc, ctx):
+    """Icon + text rows on glass cards over the footage (amenities, benefits, specs)."""
+    U, W = ctx.U, ctx.W
+    bg = clip_bg(sc, {"dim": sc.get("dim", 0.82)}, 0.05)
+    items = [({"text": it, "icon": "check"} if isinstance(it, str) else it) for it in sc.get("items", [])][:6]
+    widest = 0
+    probe = [line_mask(it["text"], ctx.font("heavy", sc.get("size", 62))) for it in items]
+    if probe:
+        widest = max(m.width for m in probe)
+    rw = min(W * 0.9, max(W * 0.78, widest + 210 * U))
+    rows = [glass_row(ctx, it["text"], it.get("icon", "check"), rw, sc.get("size", 62)) for it in items]
+    title = boxed(ctx, sc["title"], sc.get("title_size", 86)) if sc.get("title") else None
+    els = [scrim_el(ctx, "center", 0.35, 0.8)]
+    lay = place_block(ctx, [title] + rows, sc.get("pos", "center"),
+                      ([int(6 * U)] if title else []) + [int(-30 * U)] * len(rows))
+    sfx, k = [], 0
+    if title:
+        els.append(Sprite(lay[0][0], W / 2, lay[0][1], 0.05, "pop", 0.32))
+        k = 1
+    for j, (im, cy) in enumerate(lay[k:]):
+        t = 0.35 + 0.32 * j
+        rtl = is_rtl(items[j]["text"])
+        els.append(Sprite(im, W / 2, cy, t, "right" if rtl else "left", 0.32))
+        sfx.append((t + 0.05, "pop", 0.5))
+    return bg, els, sfx
+
+
+def b_location(sc, ctx):
+    """Map pin drops onto the footage with a ripple, then the place name and an optional headline."""
+    U, W, H = ctx.U, ctx.W, ctx.H
+    bg = clip_bg(sc, {}, 0.06)
+    els = [scrim_el(ctx, "center", 0.32, 0.7)]
+    ps = int(170 * U)
+    pin = icon_img("pin", ps, ctx.c["primary"])
+    dot = Image.new("RGBA", pin.size)
+    r = ps * 0.3 * 0.42
+    ImageDraw.Draw(dot).ellipse((ps / 2 - r, ps * 0.38 - r, ps / 2 + r, ps * 0.38 + r), fill=(255, 255, 255, 255))
+    pin.alpha_composite(dot)
+    pin = finish(pin, pin.getchannel("A"), 0.6, U=U)
+    pa = np.asarray(pin)
+    pl = pill(ctx, sc["place"], None, 50) if sc.get("place") else None
+    title = boxed(ctx, sc["title"], sc.get("size", 100)) if sc.get("title") else None
+    lay = place_block(ctx, [pin, pl, title], sc.get("pos", "center"), [int(-6 * U), int(-6 * U)])
+    pin_cy = lay[0][1]
+    tip_y = pin_cy - pin.height / 2 + int(26 * U) + ps * 0.95
+    t_land = 0.42
+
+    def drop(out, t, bgf):
+        if t < 0.1:
+            return
+        p = clamp((t - 0.1) / (t_land - 0.1))
+        dy = -(1 - e_back(p, 1.3)) * H * 0.22
+        over(out, pa, W / 2 - pa.shape[1] / 2, pin_cy - pa.shape[0] / 2 + dy, clamp(p * 3))
+        for k in range(2):
+            dk = t - t_land - 0.16 * k
+            if 0 < dk < 0.9:
+                rx = 24 * U + dk * 280 * U
+                ry = rx * 0.32
+                S_ = (int(rx * 2 + 12), int(ry * 2 + 12))
+                im = Image.new("RGBA", S_)
+                ImageDraw.Draw(im).ellipse((6, 6, S_[0] - 6, S_[1] - 6), outline=(255, 255, 255, int(220 * (1 - dk / 0.9))),
+                                           width=max(2, int(5 * U)))
+                over(out, np.asarray(im), W / 2 - S_[0] / 2, tip_y - S_[1] / 2)
+    els.insert(1, Fn(drop))
+    i = 1
+    if pl:
+        els.append(Sprite(lay[i][0], W / 2, lay[i][1], 0.62, "up"))
+        i += 1
+    if title:
+        els.append(Sprite(lay[i][0], W / 2, lay[i][1], 0.82, sc.get("anim", "wipe"), 0.36))
+    return bg, els, [(t_land - 0.02, "thump", 0.55), (0.64, "pop", 0.4)]
+
+
+# ----------------------------------------------------------------- v3 motion graphics: 3D tilt, UI mockups, devices
+def _persp_coeffs(dst, src):
+    A, B = [], []
+    for (x, y), (X, Y) in zip(dst, src):
+        A.append([x, y, 1, 0, 0, 0, -X * x, -X * y])
+        B.append(X)
+        A.append([0, 0, 0, x, y, 1, -Y * x, -Y * y])
+        B.append(Y)
+    return np.linalg.solve(np.array(A, float), np.array(B, float)).tolist()
+
+
+def tilt(img, ry=0.0, rx=0.0, dist=2.4):
+    """Fake 3D: rotate a flat RGBA card around its vertical (ry) and horizontal (rx) axis, in degrees."""
+    if abs(ry) < 0.05 and abs(rx) < 0.05:
+        return img
+    w, h = img.size
+    d = dist * max(w, h)
+    ay, ax = math.radians(ry), math.radians(rx)
+    pts = []
+    for (x, y) in ((-w / 2, -h / 2), (w / 2, -h / 2), (w / 2, h / 2), (-w / 2, h / 2)):
+        x1, z1 = x * math.cos(ay), x * math.sin(ay)
+        y1, z2 = y * math.cos(ax) - z1 * math.sin(ax), y * math.sin(ax) + z1 * math.cos(ax)
+        f = d / (d + z2)
+        pts.append((x1 * f, y1 * f))
+    mx, my = min(p[0] for p in pts), min(p[1] for p in pts)
+    dst = [(p[0] - mx, p[1] - my) for p in pts]
+    bw, bh = int(math.ceil(max(p[0] for p in dst))) + 1, int(math.ceil(max(p[1] for p in dst))) + 1
+    co = _persp_coeffs(dst, [(0, 0), (w, 0), (w, h), (0, h)])
+    return img.transform((bw, bh), Image.PERSPECTIVE, co, Image.BICUBIC)
+
+
+def _txt(ctx, text, role, px, color):
+    if role == "mono" and is_rtl(text):
+        role = "heavy"
+    m = line_mask(text, get_font(ctx.ts[role], px))
+    lay = Image.new("RGBA", m.size, tuple(color[:3]) + (0,))
+    lay.putalpha(m)
+    return lay
+
+
+def ui_mock(ctx, w, h, kind="dashboard", title="", p=1.0):
+    """Illustrative app screen in brand colours (no real data): dashboard | crm | flow | shop. p animates it in."""
+    c = ctx.c
+    s = w / 600.0
+    surf, card, line = (13, 17, 25), (22, 28, 40), (40, 50, 66)
+    im = Image.new("RGBA", (w, h), surf + (255,))
+    d = ImageDraw.Draw(im)
+    pad = int(24 * s)
+    d.rectangle((0, 0, w, int(92 * s)), fill=(17, 22, 32, 255))
+    if title:
+        t = _txt(ctx, title, "heavy", int(34 * s), c["text"])
+        im.alpha_composite(t, (w - pad - t.width, int(46 * s - t.height / 2)))
+    d.ellipse((pad, int(30 * s), pad + int(34 * s), int(64 * s)), fill=c["primary"] + (255,))
+    y0 = int(112 * s)
+    q = e_cubic(clamp(p))
+    if kind == "dashboard":
+        cw = (w - 2 * pad - 2 * int(14 * s)) // 3
+        for i in range(3):
+            x = w - pad - (i + 1) * cw - i * int(14 * s)
+            d.rounded_rectangle((x, y0, x + cw, y0 + int(150 * s)), int(18 * s), fill=card + (255,))
+            d.rounded_rectangle((x + int(16 * s), y0 + int(18 * s), x + int(cw * 0.55), y0 + int(32 * s)), 6, fill=line + (255,))
+            col = (c["primary"], c["primary2"], c["accent"])[i]
+            pts = [(x + int(16 * s) + j * (cw - int(32 * s)) / 7, y0 + int(120 * s) - int((22 + 40 * abs(math.sin(j * 1.3 + i))) * s * q))
+                   for j in range(8)]
+            d.line(pts, fill=col + (255,), width=max(2, int(5 * s)), joint="curve")
+        y1 = y0 + int(176 * s)
+        d.rounded_rectangle((pad, y1, w - pad, y1 + int(300 * s)), int(20 * s), fill=card + (255,))
+        bars = [0.35, 0.55, 0.45, 0.75, 0.6, 0.9, 0.8]
+        bw = (w - 2 * pad - int(60 * s)) / len(bars)
+        for j, b in enumerate(bars):
+            bh = int(230 * s * b * clamp(q * 1.4 - j * 0.06))
+            x = w - pad - int(30 * s) - (j + 1) * bw
+            g = pe_grad_box(int(bw * 0.62), max(1, bh), [c["hi"], c["primary"], c["primary2"]])
+            im.alpha_composite(g, (int(x + bw * 0.19), y1 + int(270 * s) - bh))
+        y2 = y1 + int(326 * s)
+        for r in range(6):
+            yy = y2 + r * int(86 * s)
+            if yy + int(70 * s) > h - pad:
+                break
+            d.rounded_rectangle((pad, yy, w - pad, yy + int(70 * s)), int(16 * s), fill=card + (255,))
+            d.ellipse((w - pad - int(58 * s), yy + int(15 * s), w - pad - int(18 * s), yy + int(55 * s)), fill=line + (255,))
+            d.rounded_rectangle((w - pad - int(260 * s), yy + int(22 * s), w - pad - int(76 * s), yy + int(34 * s)), 6, fill=(70, 82, 100, 255))
+            d.rounded_rectangle((w - pad - int(200 * s), yy + int(42 * s), w - pad - int(76 * s), yy + int(52 * s)), 5, fill=line + (255,))
+            col = (c["primary"], c["primary2"], c["accent"])[r % 3]
+            d.rounded_rectangle((pad + int(18 * s), yy + int(22 * s), pad + int(110 * s), yy + int(48 * s)), int(13 * s), fill=col + (255,))
+    elif kind == "crm":
+        cols = 3
+        cw = (w - 2 * pad - (cols - 1) * int(12 * s)) // cols
+        for i in range(cols):
+            x = w - pad - (i + 1) * cw - i * int(12 * s)
+            d.rounded_rectangle((x, y0, x + cw, h - pad), int(16 * s), fill=(17, 22, 32, 255))
+            col = (c["primary"], c["primary2"], c["accent"])[i]
+            d.rounded_rectangle((x + int(12 * s), y0 + int(14 * s), x + cw - int(12 * s), y0 + int(22 * s)), 4, fill=col + (255,))
+            n = 4 - i
+            for k in range(n):
+                yy = y0 + int(44 * s) + k * int(150 * s)
+                off = int((1 - clamp(q * 1.5 - k * 0.15 - i * 0.1)) * 60 * s)
+                d.rounded_rectangle((x + int(10 * s), yy + off, x + cw - int(10 * s), yy + int(132 * s) + off), int(14 * s), fill=card + (255,))
+                d.rounded_rectangle((x + int(26 * s), yy + int(24 * s) + off, x + cw - int(26 * s), yy + int(38 * s) + off), 6, fill=(78, 90, 110, 255))
+                d.rounded_rectangle((x + int(56 * s), yy + int(52 * s) + off, x + cw - int(26 * s), yy + int(62 * s) + off), 5, fill=line + (255,))
+                d.rounded_rectangle((x + cw - int(96 * s), yy + int(86 * s) + off, x + cw - int(26 * s), yy + int(110 * s) + off), int(12 * s), fill=col + (200,))
+    elif kind == "flow":
+        names = ["chat", "people", "calendar", "check"]
+        nodes = [(0.72, 0.2), (0.3, 0.42), (0.7, 0.64), (0.32, 0.86)]
+        pts = [(w * x, y0 + (h - y0) * y) for x, y in nodes]
+        seg = q * (len(pts) - 1)
+        for i in range(len(pts) - 1):
+            f = clamp(seg - i)
+            if f <= 0:
+                continue
+            (xa, ya), (xb, yb) = pts[i], pts[i + 1]
+            curve = [(xa + (xb - xa) * u, ya + (yb - ya) * (3 * u * u - 2 * u * u * u)) for u in np.linspace(0, f, 24)]
+            d.line(curve, fill=c["primary"] + (255,), width=max(2, int(6 * s)), joint="curve")
+        for i, (x, y) in enumerate(pts):
+            if seg < i - 0.05:
+                continue
+            r = int(70 * s)
+            d.rounded_rectangle((x - r * 1.5, y - r, x + r * 1.5, y + r), int(26 * s), fill=card + (255,), outline=c["primary"] + (160,), width=max(1, int(3 * s)))
+            g = icon_img(names[i], int(r * 0.9), c["primary"])
+            im.alpha_composite(g, (int(x - g.width / 2), int(y - g.height / 2)))
+    else:  # shop
+        cw = (w - 2 * pad - int(14 * s)) // 2
+        for k in range(6):
+            i, j = k % 2, k // 2
+            x = w - pad - (i + 1) * cw - i * int(14 * s)
+            yy = y0 + j * int(330 * s)
+            if yy + int(310 * s) > h - pad:
+                break
+            off = int((1 - clamp(q * 1.6 - k * 0.12)) * 70 * s)
+            d.rounded_rectangle((x, yy + off, x + cw, yy + int(310 * s) + off), int(18 * s), fill=card + (255,))
+            g = pe_grad_box(cw - int(24 * s), int(190 * s), [c["primary2"], c["primary"]])
+            im.alpha_composite(g, (x + int(12 * s), yy + int(12 * s) + off))
+            d.rounded_rectangle((x + int(18 * s), yy + int(222 * s) + off, x + cw - int(40 * s), yy + int(238 * s) + off), 6, fill=(78, 90, 110, 255))
+            d.rounded_rectangle((x + cw - int(110 * s), yy + int(258 * s) + off, x + cw - int(18 * s), yy + int(290 * s) + off), int(14 * s), fill=c["accent"] + (255,))
+    return im
+
+
+def pe_grad_box(w, h, stops, radius=6):
+    m = Image.new("L", (max(1, w), max(1, h)))
+    ImageDraw.Draw(m).rounded_rectangle((0, 0, m.width - 1, m.height - 1), min(radius, m.width // 2, m.height // 2), fill=255)
+    return gradient_fill(m, stops)
+
+
+def device_img(ctx, kind, screen, width):
+    """Phone or laptop frame around an RGBA screen image (resized to fit)."""
+    c = ctx.c
+    W = int(width)
+    if kind == "laptop":
+        sw = int(W * 0.84)
+        sh = int(sw * 0.625)
+        bez = int(W * 0.022)
+        lid = Image.new("RGBA", (sw + 2 * bez, sh + 2 * bez))
+        d = ImageDraw.Draw(lid)
+        d.rounded_rectangle((0, 0, lid.width - 1, lid.height - 1), int(bez * 1.4), fill=(10, 12, 16, 255), outline=c["primary"] + (110,), width=max(1, bez // 6))
+        lid.alpha_composite(ImageOps_fit(screen, (sw, sh)), (bez, bez))
+        base_h = int(W * 0.045)
+        out = Image.new("RGBA", (W, lid.height + base_h))
+        out.alpha_composite(lid, ((W - lid.width) // 2, 0))
+        ImageDraw.Draw(out).polygon([(0, out.height - 1), (W - 1, out.height - 1), (W - (W - lid.width) // 2 + bez, lid.height),
+                                     ((W - lid.width) // 2 - bez, lid.height)], fill=(34, 40, 52, 255))
+        return out
+    h = int(W * 2.05)
+    bez = int(W * 0.035)
+    out = Image.new("RGBA", (W, h))
+    d = ImageDraw.Draw(out)
+    d.rounded_rectangle((0, 0, W - 1, h - 1), int(W * 0.15), fill=(10, 12, 16, 255), outline=c["primary"] + (120,), width=max(1, int(W * 0.008)))
+    sw, sh = W - 2 * bez, h - 2 * bez
+    scr = ImageOps_fit(screen, (sw, sh))
+    scr.putalpha(Image.fromarray(np.minimum(np.asarray(scr.getchannel("A")), np.asarray(rounded_mask(sw, sh, int(W * 0.12))))))
+    out.alpha_composite(scr, (bez, bez))
+    pw, ph = int(W * 0.3), int(W * 0.075)
+    d.rounded_rectangle(((W - pw) // 2, bez + int(W * 0.03), (W + pw) // 2, bez + int(W * 0.03) + ph), ph // 2, fill=(0, 0, 0, 255))
+    return out
+
+
+def ImageOps_fit(im, size):
+    from PIL import ImageOps
+    return ImageOps.fit(im.convert("RGBA"), (max(1, size[0]), max(1, size[1])), Image.LANCZOS)
+
+
+def glow_blob(ctx, w, h, color, alpha=0.55):
+    m = Image.new("L", (int(w), int(h)))
+    ImageDraw.Draw(m).ellipse((w * 0.15, h * 0.15, w * 0.85, h * 0.85), fill=int(255 * alpha))
+    m = m.filter(ImageFilter.GaussianBlur(min(w, h) * 0.12))
+    im = Image.new("RGBA", m.size, tuple(color) + (0,))
+    im.putalpha(m)
+    return np.asarray(im)
+
+
+def b_device(sc, ctx):
+    """Phone/laptop mockup that rises in with a 3D tilt, floats, and plays an animated UI or a screenshot."""
+    U, W, H = ctx.U, ctx.W, ctx.H
+    bg = clip_bg(sc, {"dim": 0.5, "blur": 10}, 0.04) if sc.get("clip") else {"kind": "panel"}
+    kind = sc.get("device", "phone")
+    dw = W * (0.5 if kind == "phone" else 0.9) * float(sc.get("device_scale", 1.0)) * (0.62 if ctx.land else 1)
+    if kind == "phone":
+        sw, sh = int(dw * 0.93), int(dw * 2.05 - dw * 0.07)
+    else:
+        sw, sh = int(dw * 0.84), int(dw * 0.84 * 0.625)
+    shot = Image.open(sc["image"]).convert("RGBA") if sc.get("image") else None
+    cache = {}
+
+    def device_at(p):
+        k = 24 if shot is not None else int(round(clamp(p) * 24))
+        if k not in cache:
+            scr = shot if shot is not None else ui_mock(ctx, sw, sh, sc.get("ui", "dashboard"), sc.get("ui_title", ""), k / 24)
+            cache[k] = device_img(ctx, kind, scr, dw)
+        return cache[k]
+    label = pill(ctx, sc["label"], sc.get("icon"), 48) if sc.get("label") else None
+    title = None
+    if sc.get("title"):
+        title = boxed(ctx, sc["title"], sc.get("size", 96)) if sc.get("style", "box") == "box" else \
+            ctx.T(sc["title"], "display", sc.get("size", 110), grad=True, wrap=True)
+    top_items = [i for i in (label, title) if i is not None]
+    lay = place_block(ctx, top_items, "top", [int(-8 * U)]) if top_items else []
+    text_bottom = (lay[-1][1] + lay[-1][0].height / 2) if lay else ctx.top
+    d0 = device_at(1.0)
+    dev_cy = (text_bottom + ctx.H * 0.96) / 2 if not ctx.land else H * 0.55
+    gl = glow_blob(ctx, d0.width * 1.5, d0.height * 0.9, ctx.c["primary"], 0.5)
+    base_ry = float(sc.get("tilt", -12))
+
+    def draw(out, t, bgf):
+        p = clamp(t / 0.75)
+        e = e_cubic(p)
+        a = clamp(p * 2.5)
+        over(out, gl, W / 2 - gl.shape[1] / 2, dev_cy - gl.shape[0] / 2, a * (0.75 + 0.25 * math.sin(t * 2)))
+        dev = device_at(clamp((t - 0.35) / 1.3))
+        ry = base_ry + (1 - e) * 22 + 2.5 * math.sin(t * 1.3)
+        rx = (1 - e) * 14 + 1.5 * math.sin(t * 0.9)
+        im = tilt(dev, ry, rx)
+        dy = (1 - e) * H * 0.3 + math.sin(t * 1.6) * 8 * U
+        over(out, np.asarray(im), W / 2 - im.width / 2, dev_cy - im.height / 2 + dy, a)
+    els = [Fn(draw)]
+    for j, (im, cy) in enumerate(lay):
+        els.append(Sprite(im, W / 2, cy, 0.1 + 0.18 * j, "wipe" if (j == len(lay) - 1 and title is not None and sc.get("style", "box") == "box") else "down", 0.34))
+    if sc.get("note"):
+        nt = ctx.T(sc["note"], "body", sc.get("note_size", 30), color=ctx.c.get("muted", (160, 170, 185)), shadow=0.4)
+        side = W * 0.045 + nt.width / 2 if is_rtl(sc["note"]) else W * 0.955 - nt.width / 2
+        els.append(Sprite(nt, side, min(dev_cy + d0.height * 0.22, ctx.bot - nt.height), 0.6, "fade", 0.4))
+    return bg, els, [(0.05, "whoosh", 0.45)]
+
+
+def reveal_line(img, cx, cy, t0, d=0.45):
+    """Text line that slides up out of an invisible mask (classic motion-graphics reveal)."""
+    arr = np.asarray(img)
+    h, w = arr.shape[:2]
+
+    def f(out, t, bgf):
+        if t < t0:
+            return
+        p = e_expo(clamp((t - t0) / d))
+        off = int((1 - p) * h * 0.92)
+        if h - off <= 0:
+            return
+        over(out, arr[:h - off], cx - w / 2, cy - h / 2 + off, clamp(p * 1.6))
+    return Fn(f)
+
+
+def b_kinetic(sc, ctx):
+    """Kinetic typography: lines rise out of masks one after another; accent lines get the brand gradient and an underline sweep."""
+    U, W = ctx.U, ctx.W
+    bg = clip_bg(sc, {"dim": 0.45, "blur": 8}, 0.05) if sc.get("clip") else {"kind": "panel"}
+    acc = [ctx.c["hi"], ctx.c["primary"], ctx.c["primary2"]]
+    imgs, styles, specs = [], [], []
+    if sc.get("kicker"):
+        imgs.append(ctx.T(sc["kicker"], "mono", sc.get("kicker_size", 38), color=ctx.c["primary"], shadow=0.3))
+        styles.append("kicker")
+        specs.append({})
+    for ln in sc.get("lines", []):
+        ln = {"text": ln} if isinstance(ln, str) else ln
+        st = ln.get("style", "big")
+        if st == "accent":
+            im = ctx.T(ln["text"], "display", ln.get("size", 150), grad=acc, wrap=ln.get("wrap", False), glow=ctx.c["primary"])
+        elif st == "small":
+            im = ctx.T(ln["text"], "heavy", ln.get("size", 62), color=ctx.c["muted"], wrap=ln.get("wrap", False))
+        elif st == "mono":
+            im = ctx.T(ln["text"], "mono", ln.get("size", 40), color=ctx.c["primary"])
+        elif st == "box":
+            im = boxed(ctx, ln["text"], ln.get("size", 110))
+        else:
+            im = ctx.T(ln["text"], "display", ln.get("size", 150), color=ctx.c["text"] if bg["kind"] == "panel" else (255, 255, 255), wrap=ln.get("wrap", False))
+        imgs.append(im)
+        styles.append(st)
+        specs.append(ln)
+    lay = place_block(ctx, imgs, sc.get("pos", "center"), [int(-30 * U)] * len(imgs))
+    els = []
+    if sc.get("clip"):
+        els.append(scrim_el(ctx, "center", 0.35, 0.7))
+    st0, stag = float(sc.get("start", 0.06)), float(sc.get("stagger", 0.16))
+    for j, ((im, cy), st, spec) in enumerate(zip(lay, styles, specs)):
+        t0 = st0 + stag * j
+        els.append(reveal_line(im, W / 2, cy, t0))
+        if st == "accent" and sc.get("underline", True) and spec.get("underline", True):
+            uw, uh = int(im.width * 0.62), max(3, int(8 * U))
+            bar = np.asarray(pe_grad_box(uw, uh, [ctx.c["primary"], ctx.c["primary2"]], uh // 2))
+            ty = cy + im.height / 2 - int(18 * U)
+
+            def ul(out, t, bgf, t0=t0, bar=bar, uw=uw, ty=ty):
+                p = e_cubic(clamp((t - t0 - 0.3) / 0.45))
+                vis = int(uw * p)
+                if vis > 1:
+                    over(out, bar[:, uw - vis:], W / 2 + uw / 2 - vis, ty)
+            els.append(Fn(ul))
+    return bg, els, [(st0 + 0.02, "whoosh", 0.3)]
+
+
+def card_img(ctx, item, w, h, idx):
+    U, c = ctx.U, ctx.c
+    im = Image.new("RGBA", (int(w), int(h)))
+    d = ImageDraw.Draw(im)
+    r = int(30 * U)
+    d.rounded_rectangle((0, 0, im.width - 1, im.height - 1), r, fill=(16, 21, 30, 236))
+    rg = Image.new("L", im.size)
+    ImageDraw.Draw(rg).rounded_rectangle((0, 0, im.width - 1, im.height - 1), r, outline=200, width=max(2, int(3 * U)))
+    im.alpha_composite(gradient_fill(rg, [c["primary"], c["primary2"]]))
+    rtl = item.get("_rtl", is_rtl(item.get("title", "")))
+    ic = int(min(w, h) * 0.3)
+    disc = Image.new("RGBA", (ic, ic))
+    ImageDraw.Draw(disc).ellipse((0, 0, ic - 1, ic - 1), fill=c["primary"] + (255,))
+    g = icon_img(item.get("icon", "sparkle"), int(ic * 0.56), ink_for(c["primary"]))
+    disc.alpha_composite(g, ((ic - g.width) // 2, (ic - g.height) // 2))
+    pad = int(26 * U)
+    im.alpha_composite(disc, (im.width - pad - ic if rtl else pad, pad))
+    num = _txt(ctx, f"{idx + 1:02d}", "mono", int(30 * U), c["muted"])
+    im.alpha_composite(num, (pad if rtl else im.width - pad - num.width, pad))
+    f = ctx.font("heavy", item.get("size", 48))
+    txt = wrap_text(item.get("title", ""), f, w - 2 * pad)
+    tm = text_mask(txt, f)
+    if tm.width > w - 2 * pad:
+        f = ctx.font("heavy", item.get("size", 48) * (w - 2 * pad) / tm.width * 0.97)
+        tm = text_mask(txt, f)
+    lay = Image.new("RGBA", tm.size, c["text"] + (0,))
+    lay.putalpha(tm)
+    sub = _txt(ctx, item["text"], "body", int(30 * U), c["muted"]) if item.get("text") else None
+    yb = im.height - pad - (sub.height + int(6 * U) if sub else 0)
+    im.alpha_composite(lay, (im.width - pad - tm.width if rtl else pad, yb - tm.height))
+    if sub:
+        sub = sub if sub.width <= w - 2 * pad else sub.resize((int(w - 2 * pad), int(sub.height * (w - 2 * pad) / sub.width)))
+        im.alpha_composite(sub, (im.width - pad - sub.width if rtl else pad, yb + int(6 * U)))
+    return finish(im, im.getchannel("A"), 0.55, U=U)
+
+
+def b_cards(sc, ctx):
+    """Grid of glass cards (icon, number, title, line) that rise in with a 3D tilt - services, products, offers."""
+    U, W, H = ctx.U, ctx.W, ctx.H
+    bg = clip_bg(sc, {"dim": 0.4, "blur": 12}, 0.04) if sc.get("clip") else {"kind": "panel"}
+    items = [({"title": it} if isinstance(it, str) else it) for it in sc.get("items", [])][:6]
+    cols = int(sc.get("cols", 3 if ctx.land else 2))
+    rows = max(1, math.ceil(len(items) / cols))
+    gap = 22 * U
+    head = []
+    if sc.get("kicker"):
+        head.append(ctx.T(sc["kicker"], "mono", sc.get("kicker_size", 40), color=ctx.c["primary"], shadow=0.3))
+    if sc.get("title"):
+        head.append(ctx.T(sc["title"], "display", sc.get("title_size", 96), color=ctx.c["text"], wrap=True))
+    hh = sum(i.height for i in head) - 30 * U * max(0, len(head) - 1)
+    gw = W * (0.9 if not ctx.land else 0.8)
+    cw = (gw - gap * (cols - 1)) / cols
+    avail = ctx.bot - ctx.top - hh - 30 * U
+    ch = min(cw * float(sc.get("card_ratio", 0.9)), (avail - gap * (rows - 1)) / rows)
+    grid_rtl = sc.get("rtl", is_rtl(" ".join(str(it.get("title", "")) for it in items) + str(sc.get("title", ""))))
+    imgs = [card_img(ctx, dict(it, _rtl=grid_rtl), cw, ch, i) for i, it in enumerate(items)]
+    P = imgs[0].width - cw if imgs else 0
+    block = hh + 30 * U + rows * ch + (rows - 1) * gap
+    y = ctx.cy - block / 2
+    els = []
+    for j, im in enumerate(head):
+        els.append(reveal_line(im, W / 2, y + im.height / 2, 0.05 + 0.12 * j))
+        y += im.height - 30 * U
+    y += 30 * U + 26 * U
+    sfx = []
+    for i, im in enumerate(imgs):
+        r_, k_ = divmod(i, cols)
+        x = W / 2 + gw / 2 - cw / 2 - k_ * (cw + gap) if grid_rtl else W / 2 - gw / 2 + cw / 2 + k_ * (cw + gap)
+        cy = y + r_ * (ch + gap) + ch / 2
+        ti = 0.3 + 0.12 * i
+
+        def draw(out, t, bgf, im=im, x=x, cy=cy, ti=ti, i=i):
+            if t < ti:
+                return
+            p = clamp((t - ti) / 0.5)
+            e = e_cubic(p)
+            img = tilt(im, 0, (1 - e) * 38) if p < 1 else im
+            dy = (1 - e) * 110 * U + (math.sin(t * 1.4 + i) * 4 * U if p >= 1 else 0)
+            over(out, np.asarray(img), x - img.width / 2, cy - img.height / 2 + dy, clamp(p * 2.2))
+        els.append(Fn(draw))
+        sfx.append((ti + 0.05, "pop", 0.4))
+    if sc.get("highlight", True) and imgs:
+        # after the grid lands, a light passes over each card in reading order (keeps a long hold alive)
+        g = int(22 * U)
+        r = int(30 * U)
+        hl = Image.new("RGBA", (int(cw) + 2 * g, int(ch) + 2 * g))
+        ImageDraw.Draw(hl).rounded_rectangle((g, g, g + int(cw) - 1, g + int(ch) - 1), r, outline=ctx.c["hi"] + (255,),
+                                             width=max(2, int(4 * U)))
+        glow = hl.filter(ImageFilter.GaussianBlur(9 * U))
+        hl = Image.alpha_composite(glow, hl)
+        ha = np.asarray(hl)
+        t_hl = 0.3 + 0.12 * len(imgs) + 0.55
+        step = float(sc.get("highlight_step", 0.32))
+        for i in range(len(imgs)):
+            r_, k_ = divmod(i, cols)
+            x = W / 2 + gw / 2 - cw / 2 - k_ * (cw + gap) if grid_rtl else W / 2 - gw / 2 + cw / 2 + k_ * (cw + gap)
+            cy = y + r_ * (ch + gap) + ch / 2
+
+            def hdraw(out, t, bgf, x=x, cy=cy, i=i):
+                u = (t - t_hl - i * step) / 0.7
+                if 0 < u < 1:
+                    over(out, ha, x - ha.shape[1] / 2, cy - ha.shape[0] / 2 + math.sin(t * 1.4 + i) * 4 * U,
+                         math.sin(math.pi * u) ** 2)
+            els.append(Fn(hdraw))
+    return bg, els, sfx
+
+
+def b_steps(sc, ctx):
+    """Process timeline: a line draws down, numbered nodes pop as it reaches them, each step's text slides in."""
+    U, W = ctx.U, ctx.W
+    bg = clip_bg(sc, {"dim": 0.4, "blur": 12}, 0.04) if sc.get("clip") else {"kind": "panel"}
+    items = [({"title": it} if isinstance(it, str) else it) for it in sc.get("items", [])][:5]
+    rtl = is_rtl(" ".join(i.get("title", "") for i in items)) if items else True
+    head = ctx.T(sc["title"], "display", sc.get("title_size", 96), color=ctx.c["text"], wrap=True) if sc.get("title") else None
+    rows = []
+    for it in items:
+        t1 = ctx.T(it.get("title", ""), "heavy", it.get("size", 60), color=ctx.c["text"], shadow=0.4, max_w=W * 0.62)
+        t2 = ctx.T(it["text"], "body", 36, color=ctx.c["muted"], shadow=0.3, max_w=W * 0.62, wrap=True) if it.get("text") else None
+        rows.append((t1, t2))
+    rh = max((r[0].height + (r[1].height - 40 * U if r[1] else 0)) for r in rows) if rows else 0
+    step = rh + 18 * U
+    block = (head.height if head else 0) + step * len(rows)
+    y = ctx.cy - block / 2
+    els, sfx = [], []
+    if head:
+        els.append(reveal_line(head, W / 2, y + head.height / 2, 0.05))
+        y += head.height
+    lx = W * (0.86 if rtl else 0.14)
+    nr = 34 * U
+    ys = [y + step * i + step / 2 for i in range(len(rows))]
+    per = float(sc.get("per", 0.55))
+    t_nodes = [0.35 + per * i for i in range(len(rows))]
+    bar_w = max(3, int(6 * U))
+
+    def line(out, t, bgf):
+        if len(ys) < 2:
+            return
+        p = clamp((t - t_nodes[0]) / max(0.01, t_nodes[-1] - t_nodes[0]))
+        y1 = ys[0] + (ys[-1] - ys[0]) * p
+        hgt = int(y1 - ys[0])
+        if hgt > 1:
+            g = np.asarray(pe_grad_box(bar_w, hgt, [ctx.c["primary"], ctx.c["primary2"]], bar_w // 2))
+            over(out, g, lx - bar_w / 2, ys[0])
+    els.append(Fn(line))
+    for i, (cy, (t1, t2)) in enumerate(zip(ys, rows)):
+        ti = t_nodes[i]
+        node = Image.new("RGBA", (int(nr * 2 + 8), int(nr * 2 + 8)))
+        ImageDraw.Draw(node).ellipse((4, 4, node.width - 4, node.height - 4), fill=ctx.c["primary"] + (255,))
+        num = _txt(ctx, f"{i + 1:02d}", "mono", int(28 * U), ink_for(ctx.c["primary"]))
+        node.alpha_composite(num, ((node.width - num.width) // 2, (node.height - num.height) // 2))
+        node = finish(node, node.getchannel("A"), 0.4, glow=ctx.c["primary"], U=U)
+        els.append(Sprite(node, lx, cy, ti, "pop", 0.3))
+        tx_edge = lx - nr - 30 * U if rtl else lx + nr + 30 * U
+        c1 = tx_edge - t1.width / 2 if rtl else tx_edge + t1.width / 2
+        y1 = cy - (t2.height / 2 - 20 * U if t2 else 0)
+        els.append(Sprite(t1, c1, y1, ti + 0.06, "right" if rtl else "left", 0.32))
+        if t2:
+            c2 = tx_edge - t2.width / 2 if rtl else tx_edge + t2.width / 2
+            els.append(Sprite(t2, c2, y1 + t1.height / 2 + t2.height / 2 - 44 * U, ti + 0.14, "fade", 0.32))
+        sfx.append((ti + 0.02, "pop", 0.45))
+    return bg, els, sfx
+
+
+def burst_fx(ctx, cx, cy, t0=0.12, n=28, color=None):
+    """Expanding ring + particles flying out from a point (logo reveals, big moments)."""
+    U = ctx.U
+    color = color or ctx.c["primary"]
+    rng = np.random.default_rng(3)
+    dirs = [(math.cos(a), math.sin(a), rng.uniform(0.6, 1.0)) for a in np.linspace(0, 2 * math.pi, n, endpoint=False) + rng.uniform(0, 0.2, n)]
+    r = max(3, int(7 * U))
+    yy, xx = np.mgrid[-r:r + 1, -r:r + 1].astype(np.float32)
+    dot = np.zeros((2 * r + 1, 2 * r + 1, 4), np.uint8)
+    dot[..., :3] = ctx.c["hi"]
+    dot[..., 3] = (np.exp(-(xx ** 2 + yy ** 2) / (r * r * 0.25)) * 255).astype(np.uint8)
+    R = min(ctx.W, ctx.H) * 0.48
+
+    def f(out, t, bgf):
+        p = (t - t0) / 0.9
+        if not 0 <= p <= 1:
+            return
+        e = e_expo(p)
+        rad = 40 * U + e * R
+        S = int(rad * 2 + 16)
+        if S < 4000:
+            im = Image.new("RGBA", (S, S))
+            ImageDraw.Draw(im).ellipse((8, 8, S - 8, S - 8), outline=tuple(color) + (int(200 * (1 - p)),), width=max(2, int(5 * U)))
+            over(out, np.asarray(im), cx - S / 2, cy - S / 2)
+        for (dx, dy, k) in dirs:
+            over(out, dot, cx + dx * e * R * k - r, cy + dy * e * R * k - r, (1 - p) * 0.9)
+    return Fn(f)
+
+
 BUILDERS = {"hook": b_hook, "stamp": b_stamp, "logo": b_logo, "title": b_title, "collage": b_collage,
+            "showcase": b_showcase, "features": b_features, "location": b_location,
+            "kinetic": b_kinetic, "cards": b_cards, "steps": b_steps, "device": b_device,
             "counter": b_counter, "checklist": b_checklist, "testimonial": b_testimonial,
             "before_after": b_before_after, "offer": b_offer, "text": b_text, "cta": b_cta}
-DEFAULT_DUR = {"hook": 2.2, "stamp": 1.9, "logo": 2.5, "title": 1.3, "collage": 2.4, "counter": 2.0,
+DEFAULT_DUR = {"kinetic": 2.2, "device": 3.0, "showcase": 2.0, "location": 2.6, "hook": 2.2, "stamp": 1.9, "logo": 2.5, "title": 1.3, "collage": 2.4, "counter": 2.0,
                "testimonial": 4.2, "before_after": 3.6, "offer": 2.8, "text": 2.0, "cta": 5.0}
-DEFAULT_TRANS = {"hook": "cut", "stamp": "glitch", "logo": "zoom", "title": "whip", "collage": "zoom",
+DEFAULT_TRANS = {"kinetic": "blur", "cards": "zoom", "steps": "slide_up", "device": "zoom",
+                 "showcase": "slide", "features": "zoom", "location": "zoom", "hook": "cut", "stamp": "glitch", "logo": "zoom", "title": "whip", "collage": "zoom",
                  "counter": "slide_up", "checklist": "zoom", "testimonial": "fade", "before_after": "whip",
                  "offer": "flash", "text": "punch", "cta": "zoom"}
-TRANS_SFX = {"zoom": "whoosh", "whip": "whoosh", "slide_up": "whoosh", "glitch": "glitch", "flash": "thump", "punch": "thump"}
-TRANS_LEN = {"flash": 6, "zoom": 9, "whip": 9, "slide_up": 9, "glitch": 7, "punch": 8, "fade": 9}
+TRANS_SFX = {"zoom": "whoosh", "whip": "whoosh", "slide": "whoosh", "slide_up": "whoosh", "glitch": "glitch", "flash": "thump", "punch": "thump"}
+TRANS_LEN = {"flash": 6, "zoom": 9, "whip": 9, "slide": 9, "slide_up": 9, "glitch": 7, "punch": 8, "fade": 9,
+             "leak": 14, "blur": 10}
 
 
 # ----------------------------------------------------------------- transitions
@@ -1344,6 +2541,32 @@ def transition(kind, out, prev, k, U, rng):
         fr[:H - off] = prev[off:]
         fr[H - off:] = out[:off]
         return hblur(fr, int(110 * U * math.sin(math.pi * p)), 0)
+    if kind == "slide":
+        e = e_inout(p)
+        off = int(W * e)
+        fr = np.empty_like(out)
+        fr[:, off:] = prev[:, :W - off]
+        fr[:, :off] = out[:, W - off:]
+        return hblur(fr, int(26 * U * math.sin(math.pi * p)), 1)
+    if kind == "blur":
+        e = e_inout(p)
+        mix = (prev * (1 - e) + out * e).astype(np.uint8)
+        k = int(46 * U * math.sin(math.pi * p))
+        return hblur(hblur(mix, k, 1), k, 0)
+    if kind == "leak":
+        e = e_inout(p)
+        base = prev.astype(np.float32) * (1 - e) + out.astype(np.float32) * e
+        sw, sh = max(8, W // 10), max(8, H // 10)
+        yy, xx = np.mgrid[0:sh, 0:sw].astype(np.float32)
+        xx /= sw
+        yy /= sh
+        g = np.zeros((sh, sw, 3), np.float32)
+        for (bx, by, r, col) in ((-0.3 + 1.5 * p, 0.35, 0.5, (255, 196, 120)), (1.2 - 1.3 * p, 0.72, 0.42, (255, 120, 70))):
+            d2 = ((xx - bx) ** 2 + ((yy - by) * 0.6) ** 2) / (r * r)
+            g += np.exp(-d2 * 2.2)[..., None] * np.array(col, np.float32)
+        g = np.clip(g * (math.sin(math.pi * p) ** 1.3) * 0.95, 0, 255)
+        g = np.asarray(Image.fromarray(g.astype(np.uint8)).resize((W, H), Image.BILINEAR), np.float32)
+        return np.clip(255 - (255 - base) * (255 - g) / 255, 0, 255).astype(np.uint8)
     if kind == "glitch":
         base = prev if p < 0.45 else out
         fr = base.copy()
@@ -1368,6 +2591,7 @@ def expand(scenes):
                 it = {"text": it} if isinstance(it, str) else it
                 s = {"type": "title", "small": sc.get("small"), "big": it["text"], "clip": it.get("clip"),
                      "dur": it.get("dur", sc.get("per", 1.1)), "small_anim": "down" if j == 0 else "none",
+                     **({"beats": it.get("beats", sc["beats_per"])} if sc.get("beats_per") else {}),
                      "transition": sc.get("transition", "whip" if j == 0 else "punch")}
                 out.append(s)
         elif t == "stats":
@@ -1380,7 +2604,7 @@ def expand(scenes):
     return out
 
 
-NEEDS_CLIP = {"hook", "stamp", "logo", "title", "counter", "checklist", "offer", "text", "cta", "testimonial"}
+NEEDS_CLIP = {"showcase", "features", "location", "hook", "stamp", "logo", "title", "counter", "checklist", "offer", "text", "cta", "testimonial"}
 
 
 def assign_clips(scenes, pool):
@@ -1457,12 +2681,22 @@ def make_plan(brief, ctx, workdir):
     for i, sc in enumerate(scenes):
         if sc["type"] == "checklist" and "dur" not in sc:
             durs[i] = 0.5 + 0.7 * len(sc.get("items", [])) + 1.3
+        if sc["type"] == "features" and "dur" not in sc:
+            durs[i] = 0.6 + 0.32 * len(sc.get("items", [])) + 1.5
+        if sc["type"] == "cards" and "dur" not in sc:
+            durs[i] = 0.8 + 0.12 * len(sc.get("items", [])) + 1.8
+        if sc["type"] == "steps" and "dur" not in sc:
+            durs[i] = 0.6 + float(sc.get("per", 0.55)) * len(sc.get("items", [])) + 1.4
     mus = brief.get("music") or {}
     beats = np.array([])
     if mus.get("file") and mus.get("beat_sync", True) and os.path.exists(mus["file"]):
         y = load_audio(mus["file"], float(mus.get("start", 0)), sum(durs) * 1.5 + 5).mean(1)
         beats, bpm = detect_beats(y)
         log(f"[music] ~{bpm:.0f} BPM, {len(beats)} beats")
+        if len(beats) and bpm:
+            for i, sc in enumerate(scenes):
+                if sc.get("beats"):
+                    durs[i] = float(sc["beats"]) * 60.0 / bpm
     if len(beats):
         t, nd = 0.0, []
         for i, d in enumerate(durs):
@@ -1495,8 +2729,10 @@ def make_plan(brief, ctx, workdir):
         srcs = [norm_clip(sc[k])["src"] for k in ("clip", "before", "after") if sc.get(k)] + \
                [c["src"] for c in sc.get("clips", [])] + [ctx.brand.get("logo") or ""]
         stamp = [(f, os.path.getmtime(f), os.path.getsize(f)) for f in srcs if f and os.path.exists(f)]
+        caps = [c for c in ctx.captions if c["s"] < sc["_t0"] + sc["_dur"] and c["e"] > sc["_t0"]]
         h = hashlib.md5(json.dumps([VERSION, stamp, ctx.W, ctx.H, ctx.fps, ctx.c, ctx.ts, brief.get("brand", {}),
-                                    {k: v for k, v in sc.items() if k != "_t0"},
+                                    {k: v for k, v in sc.items() if k != "_t0"}, caps, ctx.bg_style, ctx.drift, ctx.top, ctx.bot,
+                                    round(sc["_t0"], 3) if (ctx.bg_style != "grid" or caps) else 0,
                                     prev_key if sc["transition"] not in ("cut", "flash", "punch") else ""],
                                    sort_keys=True, default=str).encode()).hexdigest()[:12]
         sc["_key"] = h
@@ -1510,7 +2746,8 @@ def build(sc, ctx):
     r = BUILDERS[sc["type"]](sc, ctx)
     bg, els, sfx = r[:3]
     extra = r[3] if len(r) > 3 else {}
-    if ctx.brand.get("corner_logo") and sc["type"] not in ("hook", "logo", "cta", "collage") and bg.get("kind") == "clip":
+    if ctx.brand.get("corner_logo") and sc["type"] not in ("hook", "logo", "cta", "collage") and \
+            (bg.get("kind") == "clip" or ctx.bg_style != "grid") and sc.get("corner_logo", True):
         lg = ctx.logo()
         h = 80 * ctx.U
         lg = lg.resize((max(1, int(lg.width * h / lg.height)), int(h)), Image.LANCZOS)
@@ -1526,21 +2763,33 @@ def frames(sc, ctx, k0=0, count=None, prev=None):
     W, H = ctx.W, ctx.H
     reader = None
     if bg["kind"] == "clip":
-        reader = Reader(norm_clip(bg["clip"]), W, H, ctx.fps, n, t0=k0 / ctx.fps, look=bg.get("look"),
+        lk = dict(ctx.grade)
+        lk.update(bg.get("look") or {})
+        reader = Reader(norm_clip(bg["clip"]), W, H, ctx.fps, n, t0=k0 / ctx.fps, look=lk,
                         zoom=bg.get("zoom", 0.05), seed=int(sc["_key"], 16) % 1000)
-    base = ctx.panel() if bg["kind"] == "panel" else np.zeros((H, W, 3), np.uint8)
+    animated = bg["kind"] == "panel" and ctx.bg_style != "grid"
+    base = ctx.panel() if (bg["kind"] == "panel" and not animated) else np.zeros((H, W, 3), np.uint8)
     rng = np.random.default_rng(int(sc["_key"], 16) % 2 ** 32)
     shake = extra.get("shake")
+    drift = float(sc.get("drift", ctx.drift if sc["type"] not in ("collage", "device") else 0))
     try:
         for k in range(k0, k0 + count):
             t = k / ctx.fps
-            bgf = reader.next() if reader else base
-            out = base.copy() if (bg.get("hide") or reader is None) else bgf.copy()
+            pnow = ctx.panel_frame(sc["_t0"] + t) if animated else base
+            bgf = reader.next() if reader else pnow
+            out = pnow.copy() if (bg.get("hide") or reader is None) else bgf.copy()
             for el in els:
                 el.draw(out, t, ctx, bgf)
             if shake and shake[0] <= t < shake[0] + shake[1]:
                 amp = 14 * ctx.U * (1 - (t - shake[0]) / shake[1])
                 out = np.roll(out, (int(rng.uniform(-amp, amp)), int(rng.uniform(-amp, amp))), (0, 1))
+            if drift > 0:
+                z = 1 + drift * (0.5 - 0.5 * math.cos(math.pi * min(1.0, t / max(0.1, sc["_dur"]))))
+                cw_, ch_ = W / z, H / z
+                x0_, y0_ = (W - cw_) / 2, (H - ch_) / 2
+                out = np.array(Image.fromarray(out).resize((W, H), Image.BILINEAR, box=(x0_, y0_, x0_ + cw_, y0_ + ch_)))
+            if ctx.captions:
+                draw_captions(out, sc["_t0"] + t, ctx)
             out = transition(sc["transition"], out, prev, k, ctx.U, rng)
             yield out
     finally:
@@ -1717,10 +2966,14 @@ def build_audio(brief, scenes, ctx, out_wav):
                 ev.append((0.0, TRANS_SFX[tr], 0.6))
             for (tt, name, g) in ev:
                 y, lead = get(name)
+                if tt > sc["_dur"]:
+                    continue
                 s = int((sc["_t0"] + tt - lead) * SR)
                 if s < 0:
                     y = y[-s:]
                     s = 0
+                if s >= N:
+                    continue
                 e = min(N, s + len(y))
                 mix[s:e] += y[:e - s] * g * gain
     peak = np.abs(mix).max()
@@ -1734,14 +2987,627 @@ def build_audio(brief, scenes, ctx, out_wav):
         w.writeframes(pcm.tobytes())
 
 
+# ----------------------------------------------------------------- v3: voiceover captions
+def _runs(v):
+    out, st = [], None
+    for i, x in enumerate(list(v) + [False]):
+        if x and st is None:
+            st = i
+        elif not x and st is not None:
+            out.append((st, i))
+            st = None
+    return out
+
+
+def voiced(y, hop=0.01):
+    m = y.mean(1) if y.ndim > 1 else y
+    h = int(SR * hop)
+    n = len(m) // h
+    if n == 0:
+        return np.zeros(0, bool)
+    r = np.sqrt((m[:n * h].reshape(n, h) ** 2).mean(1) + 1e-12)
+    v = r > max(np.percentile(r, 95) * 0.16, 0.003)
+    for a, b in _runs(~v):
+        if b - a < 15 and a > 0 and b < n:
+            v[a:b] = True
+    for a, b in _runs(v):
+        if b - a < 6:
+            v[a:b] = False
+    return v
+
+
+def _spread(ws, idx, hop):
+    """Spread words over the voiced frame indices idx, weighted by word length."""
+    tot = sum(len(w) + 1 for w in ws) or 1
+    out, c = [], 0.0
+    for w in ws:
+        c1 = c + (len(w) + 1) / tot
+        i0 = idx[min(len(idx) - 1, int(c * len(idx)))]
+        i1 = idx[min(len(idx) - 1, max(int(c * len(idx)), int(math.ceil(c1 * len(idx))) - 1))]
+        out.append((w, i0 * hop, (i1 + 1) * hop))
+        c = c1
+    return out
+
+
+def align_text(text, y, hop=0.01):
+    """Align the script's words to the recording without a speech model: phrases (split at punctuation) are matched
+    to the voiced stretches between pauses, then words are spread inside each phrase by length. When the number of
+    pauses does not match the phrases, phrase starts are snapped to the nearest voiced-run start (within 0.6 s)."""
+    ws = text.split()
+    v = voiced(y, hop)
+    idx_all = np.nonzero(v)[0]
+    if len(idx_all) < 5 or not ws:
+        return _spread(ws, np.arange(max(1, len(v))), hop)
+    runs = _runs(v)
+    merged = [list(runs[0])]
+    for a_, b_ in runs[1:]:
+        if a_ - merged[-1][1] < int(0.25 / hop):
+            merged[-1][1] = b_
+        else:
+            merged.append([a_, b_])
+    phrases, cur = [], []
+    for w in ws:
+        cur.append(w)
+        if w[-1:] in ".,!?;:…":
+            phrases.append(cur)
+            cur = []
+    if cur:
+        phrases.append(cur)
+    if len(phrases) == len(merged):
+        out = []
+        for ph, (a_, b_) in zip(phrases, merged):
+            out += _spread(ph, np.arange(a_, b_), hop)
+        return out
+    out = _spread(ws, idx_all, hop)
+    starts = [a_ * hop for a_, _ in merged]
+    k = 0
+    for ph in phrases:
+        t0 = out[k][1]
+        near = min(starts, key=lambda s_: abs(s_ - t0))
+        if abs(near - t0) <= 0.6 and near > t0:
+            shift = near - t0
+            for j in range(k, k + len(ph)):
+                w_, a_, b_ = out[j]
+                out[j] = (w_, a_ + shift, b_ + shift)
+        k += len(ph)
+    return out
+
+def build_captions(brief):
+    """Captions for a recorded voiceover: voiceover {file, text, at, captions: true}. Returns [{text, s, e}] in video time."""
+    vo = brief.get("voiceover") or {}
+    if not (vo.get("text") and vo.get("file") and os.path.exists(vo["file"]) and vo.get("captions", True)):
+        return []
+    y = load_audio(vo["file"], 0, None, loop=False)
+    at = float(vo.get("at", 0))
+    words = [(w, a + at, b + at) for w, a, b in align_text(vo["text"], y)]
+    maxw, maxc = int(vo.get("words_per_caption", 3)), int(vo.get("caption_chars", 18))
+    chunks, cur = [], []
+    for w in words:
+        if cur and (len(cur) >= maxw or sum(len(x[0]) + 1 for x in cur) + len(w[0]) > maxc or w[1] - cur[-1][2] > 0.45):
+            chunks.append(cur)
+            cur = []
+        cur.append(w)
+        if w[0][-1:] in ".,!?;:":
+            chunks.append(cur)
+            cur = []
+    if cur:
+        chunks.append(cur)
+    out = []
+    for i, c in enumerate(chunks):
+        nxt = chunks[i + 1][0][1] if i + 1 < len(chunks) else 1e9
+        out.append({"text": " ".join(w for w, _, _ in c), "s": round(c[0][1] - 0.04, 3), "e": round(min(nxt - 0.04, c[-1][2] + 0.5), 3)})
+    return out
+
+
+def caption_cy(ctx, h):
+    """Vertical centre of the caption box: voiceover.caption_y (fraction of the height) or just inside the bottom of the safe band."""
+    y = (ctx.brief.get("voiceover") or {}).get("caption_y")
+    return float(y) * ctx.H if y else ctx.bot - h * 0.6
+
+
+def draw_captions(out, T, ctx):
+    for c in ctx.captions:
+        if c["s"] <= T < c["e"]:
+            cache = ctx.__dict__.setdefault("_capcache", {})
+            if c["text"] not in cache:
+                cache[c["text"]] = boxed(ctx, c["text"], ctx.brief.get("voiceover", {}).get("caption_size", 64), role="heavy",
+                                         bg=(10, 10, 12), fg=(255, 255, 255))
+            im = cache[c["text"]]
+            p = clamp((T - c["s"]) / 0.12)
+            s_ = 0.86 + 0.14 * e_back(p)
+            im2 = im.resize((max(1, int(im.width * s_)), max(1, int(im.height * s_))), Image.BILINEAR) if s_ < 0.995 else im
+            cy = caption_cy(ctx, im.height)
+            over(out, np.asarray(im2), ctx.W / 2 - im2.width / 2, cy - im2.height / 2, clamp(p * 3))
+            return
+
+
+# ----------------------------------------------------------------- v3: brief loading, validation, recovery
+KNOWN_TYPES = set(BUILDERS) | {"services", "stats"}
+REQUIRED = {"hook": ["big"], "stamp": ["stamp"], "kinetic": ["lines"], "cards": ["items"], "steps": ["items"],
+            "features": ["items"], "checklist": ["items"], "services": ["items"], "stats": ["items"],
+            "before_after": ["before", "after"], "collage": [], "counter": ["value"]}
+
+
+def load_brief(path):
+    """Read a brief and apply its brand kit (brand_kit: kit.json from --brand-from) and platform defaults."""
+    brief = json.load(open(path, encoding="utf-8"))
+    base = os.path.dirname(os.path.abspath(path))
+    kit_p = brief.get("brand_kit")
+    if kit_p:
+        kp = kit_p if os.path.isabs(kit_p) else os.path.join(base, kit_p)
+        if os.path.exists(kp):
+            kit = json.load(open(kp, encoding="utf-8"))
+            kdir = os.path.dirname(os.path.abspath(kp))
+            kb = dict(kit.get("brand", {}))
+            if kb.get("logo") and not os.path.isabs(kb["logo"]):
+                kb["logo"] = os.path.relpath(os.path.join(kdir, kb["logo"]), base)
+            brief["theme"] = {**kit.get("theme", {}), **brief.get("theme", {})}
+            brief["brand"] = {**kb, **brief.get("brand", {})}
+        else:
+            log(f"[brand] brand_kit {kit_p} not found - using the brief's own theme")
+    plat = PLATFORMS.get(brief.get("platform", ""))
+    if plat and "format" not in brief:
+        brief["format"] = plat[0]
+    return brief
+
+
+def validate(brief):
+    """Catch broken briefs before rendering. Missing footage falls back to the branded panel (warning), unknown
+    scene types and missing required fields are errors."""
+    errs, warns = [], []
+    scenes = brief.get("scenes")
+    if not isinstance(scenes, list) or not scenes:
+        return ["brief has no scenes"], warns
+    for i, sc in enumerate(scenes):
+        t = sc.get("type")
+        if t not in KNOWN_TYPES:
+            errs.append(f"scene {i}: unknown type '{t}' (known: {', '.join(sorted(KNOWN_TYPES))})")
+            continue
+        for f in REQUIRED.get(t, []):
+            if not sc.get(f):
+                errs.append(f"scene {i} ({t}): missing '{f}'")
+        c = sc.get("clip")
+        if c:
+            src = norm_clip(c)["src"]
+            if not os.path.exists(src):
+                warns.append(f"scene {i} ({t}): clip '{src}' not found - using the branded background")
+                sc["clip"] = None
+        for key in ("before", "after"):
+            if sc.get(key) and not os.path.exists(norm_clip(sc[key])["src"]):
+                errs.append(f"scene {i} ({t}): {key} '{norm_clip(sc[key])['src']}' not found")
+        if sc.get("clips"):
+            ok = [c for c in sc["clips"] if os.path.exists(norm_clip(c)["src"])]
+            if len(ok) < len(sc["clips"]):
+                warns.append(f"scene {i} ({t}): {len(sc['clips']) - len(ok)} collage clip(s) missing - skipped")
+            sc["clips"] = ok
+        if sc.get("image") and not os.path.exists(sc["image"]):
+            warns.append(f"scene {i} ({t}): image '{sc['image']}' not found - showing the animated UI instead")
+            sc.pop("image")
+        for it in sc.get("items", []) if isinstance(sc.get("items"), list) else []:
+            if isinstance(it, dict) and it.get("icon") and it["icon"] not in ICONS:
+                warns.append(f"scene {i} ({t}): unknown icon '{it['icon']}' - using check")
+                it["icon"] = "check"
+        if sc.get("icon") and sc["icon"] not in ICONS:
+            warns.append(f"scene {i} ({t}): unknown icon '{sc['icon']}' - removed")
+            sc.pop("icon")
+    mus = brief.get("music") or {}
+    if mus.get("file") and not os.path.exists(mus["file"]):
+        warns.append(f"music '{mus['file']}' not found - rendering without music")
+        brief.pop("music")
+    lg = (brief.get("brand") or {}).get("logo")
+    if lg and not os.path.exists(lg):
+        warns.append(f"logo '{lg}' not found - using an initials emblem")
+        brief["brand"].pop("logo")
+    vo = brief.get("voiceover") or {}
+    if vo.get("file") and not os.path.exists(vo["file"]):
+        warns.append(f"voiceover '{vo['file']}' not found - skipped")
+        brief.pop("voiceover")
+    return errs, warns
+
+
+# ----------------------------------------------------------------- v3: brand kit extraction
+def _hsv(rgb):
+    import colorsys
+    return colorsys.rgb_to_hsv(*[v / 255 for v in rgb])
+
+
+def brand_from(src, out_json):
+    """Build a brand kit (colours, fonts, logo, name, tagline, contact) from a website folder or repo."""
+    import shutil as _sh
+    skip = ("node_modules", ".git", ".next", "dist", "build", ".vercel")
+    files = []
+    for root, dirs, fs in os.walk(src):
+        dirs[:] = [d for d in dirs if d not in skip]
+        files += [os.path.join(root, f) for f in fs]
+    vars_, fonts = {}, []
+    for f in files:
+        if f.endswith((".css", ".scss")):
+            txt = open(f, encoding="utf-8", errors="ignore").read()
+            for k, v in re.findall(r"--([\w-]+)\s*:\s*(#[0-9a-fA-F]{3,8})\b", txt):
+                vars_.setdefault(k, v)
+            fonts += re.findall(r"font-family\s*:\s*([^;]+);", txt) + re.findall(r"--font[\w-]*\s*:\s*([^;]+);", txt)
+    man = {}
+    for f in files:
+        if os.path.basename(f) in ("site.webmanifest", "manifest.json", "manifest.webmanifest"):
+            try:
+                man = json.load(open(f, encoding="utf-8"))
+                break
+            except Exception:
+                pass
+    norm = lambda h: "#" + "".join(ch * 2 for ch in h[1:4]) if len(h) == 4 else h[:7]
+    cols = {k: norm(v) for k, v in vars_.items()}
+    pick = lambda *names: next((cols[n] for n in names if n in cols), None)
+    th = {}
+    th["bg"] = pick("background", "bg", "base", "color-bg") or man.get("background_color") or man.get("theme_color")
+    th["text"] = pick("foreground", "text", "fg", "color-text")
+    th["muted"] = pick("muted", "muted-foreground", "gray", "secondary-text")
+    sat = [(k, v) for k, v in cols.items() if _hsv(hexrgb(v))[1] > 0.35 and _hsv(hexrgb(v))[2] > 0.5 and v not in (th["bg"], th["text"])]
+    if sat:
+        th["primary"] = sat[0][1]
+        h0 = _hsv(hexrgb(sat[0][1]))[0]
+        other = [v for k, v in sat[1:] if min(abs(_hsv(hexrgb(v))[0] - h0), 1 - abs(_hsv(hexrgb(v))[0] - h0)) > 0.08]
+        if other:
+            th["primary2"] = other[0]
+        soft = [v for k, v in cols.items() if ("soft" in k or "light" in k) and min(abs(_hsv(hexrgb(v))[0] - h0), 1 - abs(_hsv(hexrgb(v))[0] - h0)) < 0.06]
+        if soft:
+            th["hi"] = soft[0]
+    if "accent" in cols and cols["accent"] not in th.values():
+        th["accent"] = cols["accent"]
+    th = {k: v for k, v in th.items() if v}
+    ftxt = " ".join(fonts).lower()
+    typeset = "tech" if "noto sans hebrew" in ftxt else "bold" if "rubik" in ftxt else "classic" if "secular" in ftxt else \
+        "elegant" if ("frank" in ftxt or "assistant" in ftxt) else "tech" if "heebo" not in ftxt else "bold"
+    dark = th.get("bg") and sum(hexrgb(th["bg"])) < 200
+    th.update({"type": typeset, "grade": "bright", "bg_style": "tech" if dark else "grid"})
+    icons = [f for f in files if f.lower().endswith(".png") and re.search(r"(logo|icon|brand|apple-touch)", os.path.basename(f), re.I)
+             and "maskable" not in f]
+    logo = None
+    if icons:
+        best = max(icons, key=lambda f: Image.open(f).size[0] * Image.open(f).size[1])
+        os.makedirs(os.path.dirname(os.path.abspath(out_json)) or ".", exist_ok=True)
+        logo = os.path.join(os.path.dirname(os.path.abspath(out_json)), "brand_logo.png")
+        Image.open(best).convert("RGBA").save(logo)
+    text = ""
+    for f in files:
+        if re.search(r"(^|/)(tests?|__tests__|e2e|fixtures|mocks?)/|\.(test|spec)\.", f):
+            continue
+        if f.endswith((".ts", ".tsx", ".js", ".json", ".html", ".md")) and os.path.getsize(f) < 2_000_000:
+            text += open(f, encoding="utf-8", errors="ignore").read()
+    phones = re.findall(r"\b0(?:5\d|[2-4]|[89]|7\d)-?\d{7}\b", text)
+    phone = max(set(phones), key=phones.count) if phones else None
+    third = ("github.com", "google", "facebook.com", "instagram.com", "linkedin.com", "wa.me", "whatsapp.com", "schema.org",
+             "w3.org", "vercel.com", "npmjs", "youtube.com", "twitter.com", "x.com", "tiktok.com", "gstatic", "cloudflare",
+             "jsdelivr", "unpkg", "nextjs.org", "react.dev", "supabase.co", "example", "localhost")
+    urls = [u for u in re.findall(r"https://[a-z0-9.-]+\.(?:vercel\.app|netlify\.app|co\.il|org\.il|com|net|io|app|dev)\b", text)
+            if not any(t in u for t in third)]
+    site_hint = [u for u in re.findall(r"(?:SITE_URL|siteUrl|metadataBase)[\s\S]{0,120}?(https://[a-z0-9.-]+\.[a-z.]+)", text)
+                 if not any(t in u for t in third)]
+    site = site_hint[0] if site_hint else (max(set(urls), key=urls.count) if urls else None)
+    kit = {"name": man.get("name") or man.get("short_name"), "description": man.get("description"),
+           "theme": th, "brand": {"name": man.get("name"), "tagline": man.get("description"),
+                                   "logo": os.path.basename(logo) if logo else None, "phone": phone,
+                                   "website": site.replace("https://", "") if site else None},
+           "source": os.path.abspath(src), "css_vars": cols, "fonts_found": sorted(set(x.strip() for x in fonts))[:12]}
+    kit["brand"] = {k: v for k, v in kit["brand"].items() if v}
+    json.dump(kit, open(out_json, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    print(out_json)
+    print(json.dumps({"theme": th, "brand": kit["brand"]}, ensure_ascii=False, indent=1))
+    return kit
+
+
+# ----------------------------------------------------------------- v3: templates and storyboard
+TEMPLATES = {
+    "property": {"platform": "reels", "theme": {"preset": "gold", "type": "bold", "grade": "bright"},
+                 "brand": {"name": "<<business name>>", "phone": "<<phone>>"},
+                 "music": {"file": "assets/sfx/music.wav", "volume": 0.85},
+                 "scenes": [
+                     {"type": "hook", "style": "box", "small": "<<what · where>>", "icon": "pin", "big": "<<promise, 2-4 words>>", "clip": "<<best photo>>", "beats": 4, "impact": 0},
+                     {"type": "location", "place": "<<place>>", "title": "<<view / location line>>", "clip": "<<view photo>>", "beats": 5},
+                     {"type": "showcase", "label": "<<room>>", "icon": "home", "title": "<<2-3 words>>", "clip": "<<photo>>", "beats": 4},
+                     {"type": "showcase", "label": "<<room>>", "icon": "bed", "title": "<<2-3 words>>", "clip": "<<photo>>", "beats": 4},
+                     {"type": "features", "title": "<<what you get>>", "clip": "<<calm photo>>", "beats": 8,
+                      "items": [{"icon": "people", "text": "<<capacity>>"}, {"icon": "snow", "text": "<<amenity>>"}, {"icon": "pin", "text": "<<location fact>>"}]},
+                     {"type": "showcase", "style": "words", "title": "<<emotional line>>", "pos": "center", "clip": "<<photo>>", "beats": 4},
+                     {"type": "cta", "clip": "<<photo>>", "logo": False, "headline": "<<action>>", "button": "שלחו הודעה בוואטסאפ", "transition": "leak", "beats": 10}]},
+    "service": {"platform": "reels", "theme": {"preset": "fire", "type": "bold", "grade": "punchy"},
+                "brand": {"name": "<<business name>>", "tagline": "<<tagline>>", "logo": "<<logo.png>>", "phone": "<<phone>>"},
+                "music": {"file": "assets/sfx/music.wav", "volume": 0.8},
+                "scenes": [
+                    {"type": "hook", "small": "<<pain, part 1>>", "big": "<<pain, 1 word>>?", "clip": "<<colorful clip>>"},
+                    {"type": "stamp", "line": "<<consequence>>", "stamp": "<<1-2 words>>", "clip": "<<problem clip>>"},
+                    {"type": "logo", "clip": "<<clip>>"},
+                    {"type": "services", "small": "<<we offer>>", "items": [{"text": "<<service 1>>", "clip": "<<clip>>"}, {"text": "<<service 2>>", "clip": "<<clip>>"}]},
+                    {"type": "checklist", "clip": "<<clip>>", "items": ["<<benefit 1>>", "<<benefit 2>>", "<<benefit 3>>"]},
+                    {"type": "cta", "clip": "<<clip>>", "headline": "<<action>>", "button": "שלחו הודעה בוואטסאפ"}]},
+    "tech": {"platform": "reels", "brand_kit": "<<brand_kit.json from --brand-from>>",
+             "theme": {"preset": "tech", "type": "tech", "bg_style": "tech", "grade": "bright"},
+             "music": {"file": "assets/sfx/music.wav", "volume": 0.85},
+             "scenes": [
+                 {"type": "kinetic", "kicker": "<<SHORT MONO LABEL>>", "lines": ["<<question line 1>>", {"text": "<<accent words>>", "style": "accent"}], "beats": 4, "transition": "cut"},
+                 {"type": "kinetic", "lines": [{"text": "<<the turn>>", "style": "small"}, "<<promise line>>"], "beats": 4},
+                 {"type": "logo", "burst": True, "beats": 4},
+                 {"type": "cards", "kicker": "<<SERVICES>>", "title": "<<what I build>>", "items": [{"icon": "home", "title": "<<service>>"}, {"icon": "people", "title": "<<service>>"}, {"icon": "calendar", "title": "<<service>>"}, {"icon": "sparkle", "title": "<<service>>"}], "beats": 8},
+                 {"type": "device", "device": "phone", "ui": "dashboard", "ui_title": "<<app name>>", "label": "<<label>>", "title": "<<result line>>", "beats": 6},
+                 {"type": "steps", "title": "<<how it works>>", "items": [{"title": "<<step 1>>"}, {"title": "<<step 2>>"}, {"title": "<<step 3>>"}], "beats": 8},
+                 {"type": "cta", "logo": True, "eyebrow": "<<eyebrow>>", "headline": "<<action>>", "button": "שלחו הודעה בוואטסאפ", "beats": 10}]},
+}
+
+
+def storyboard(scenes, brief, ctx, path):
+    """Markdown storyboard + timeline of the planned edit (times after beat snapping)."""
+    bpm = None
+    mus = brief.get("music") or {}
+    rows = ["| # | time | len | beats | scene | on-screen copy | visual | transition |", "|---|---|---|---|---|---|---|---|"]
+    if mus.get("file") and os.path.exists(mus["file"]):
+        y = load_audio(mus["file"], float(mus.get("start", 0)), 30).mean(1)
+        _, bpm = detect_beats(y)
+    for i, sc in enumerate(scenes):
+        copy = " / ".join(str(sc[k]) for k in ("small", "big", "big2", "label", "title", "sub", "place", "kicker", "line", "stamp",
+                                                "tagline", "headline", "button", "eyebrow", "note") if sc.get(k))
+        if sc.get("lines"):
+            copy += " / ".join((l if isinstance(l, str) else l.get("text", "")) for l in sc["lines"])
+        if sc.get("items"):
+            copy += " [" + "; ".join((it if isinstance(it, str) else it.get("title") or it.get("text") or "") for it in sc["items"]) + "]"
+        c = sc.get("clip")
+        vis = (norm_clip(c)["src"] + (" · " + norm_clip(c).get("move", "") if norm_clip(c).get("move") else "")) if c else \
+            (f"{sc.get('device', 'phone')} · ui {sc.get('ui', 'dashboard')}" if sc["type"] == "device" else f"panel ({ctx.bg_style})")
+        bt = f"{sc['_dur'] * bpm / 60:.1f}" if bpm else "-"
+        rows.append(f"| {i} | {sc['_t0']:.2f}s | {sc['_dur']:.2f}s | {bt} | {sc['type']} | {copy.replace('|', '/')} | {vis} | {sc.get('transition')} |")
+    total = sum(sc["_dur"] for sc in scenes)
+    head = f"# Storyboard - {brief.get('out', 'promo.mp4')}\n\n{len(scenes)} scenes, {total:.1f} s, {ctx.W}x{ctx.H}@{ctx.fps}" + \
+           (f", music ~{bpm:.0f} BPM" if bpm else "") + "\n\n"
+    open(path, "w", encoding="utf-8").write(head + "\n".join(rows) + "\n")
+    return path
+
+
+# ----------------------------------------------------------------- v3: quality assurance
+def _ff(args):
+    return subprocess.run([FFMPEG, "-hide_banner", "-nostats"] + args, capture_output=True, text=True).stderr
+
+
+def layout_issues(scenes, ctx):
+    """Final-position bounds of every text/graphic sprite: outside the frame = cut off (error), outside the safe band = warning."""
+    errs, warns = [], []
+    W, H = ctx.W, ctx.H
+    side = W * 0.04
+    for i, sc in enumerate(scenes):
+        try:
+            els = build(sc, ctx)[1]
+        except Exception as ex:
+            errs.append(f"scene {i} ({sc['type']}): build failed: {ex}")
+            continue
+        caps_band = None
+        if any(c["s"] < sc["_t0"] + sc["_dur"] and c["e"] > sc["_t0"] for c in ctx.captions):
+            ch = 64 * ctx.U * 1.45 * (ctx.brief.get("voiceover", {}).get("caption_size", 64) / 64)
+            cyc = caption_cy(ctx, ch)
+            caps_band = (cyc - ch / 2, cyc + ch / 2)
+        for el in els:
+            if not isinstance(el, Sprite) or el.anim == "none":
+                continue
+            a = np.asarray(el.img)[..., 3]
+            ys, xs = np.nonzero(a > 60)
+            if not len(xs):
+                continue
+            h, w = a.shape
+            x0, x1 = el.cx - w / 2 + xs.min(), el.cx - w / 2 + xs.max()
+            y0, y1 = el.cy - h / 2 + ys.min(), el.cy - h / 2 + ys.max()
+            if sc["type"] == "collage":
+                continue
+            if caps_band and caps_band[0] < y1 and y0 < caps_band[1] and x0 < W * 0.8 and x1 > W * 0.2:
+                warns.append(f"scene {i} ({sc['type']}): scene text under the voiceover captions "
+                             f"({y0:.0f}-{y1:.0f}) - set the scene's pos to top/center or voiceover.caption_y")
+            if x0 < -1 or y0 < -1 or x1 > W + 1 or y1 > H + 1:
+                errs.append(f"scene {i} ({sc['type']}): element cut off at the frame edge ({x0:.0f},{y0:.0f})-({x1:.0f},{y1:.0f})")
+            elif x0 < side or x1 > W - side or y0 < ctx.top - 4 or y1 > ctx.bot + 4:
+                warns.append(f"scene {i} ({sc['type']}): element outside the safe band ({x0:.0f},{y0:.0f})-({x1:.0f},{y1:.0f})")
+    return errs, warns
+
+
+def qa(video, brief, scenes, ctx, creative=None, out_prefix=None):
+    """Automatic technical + structural checks with a 0-100 score. The creative part (25 pts) is a reviewer's judgement
+    passed in as 5 numbers (hook, clarity, pacing, aesthetics/brand, message/CTA, 0-5 each); it is never auto-filled."""
+    rep = {"file": video, "checks": [], "warnings": [], "errors": []}
+    pts = 0
+
+    def chk(name, ok, got, max_pts, note=""):
+        nonlocal pts
+        rep["checks"].append({"check": name, "ok": bool(ok), "value": got, "points": max_pts if ok else 0, "max": max_pts, "note": note})
+        pts += max_pts if ok else 0
+    if not os.path.exists(video):
+        rep["errors"].append("video file missing")
+        rep["score"] = 0
+        return rep
+    pr = json.loads(subprocess.run(["ffprobe", "-v", "error", "-show_streams", "-show_format", "-of", "json", video],
+                                   capture_output=True, text=True).stdout or "{}")
+    vs = [s for s in pr.get("streams", []) if s.get("codec_type") == "video"]
+    au = [s for s in pr.get("streams", []) if s.get("codec_type") == "audio"]
+    v = vs[0] if vs else {}
+    dur = float(pr.get("format", {}).get("duration", 0) or 0)
+    chk("opens; h264 + aac; yuv420p", vs and au and v.get("codec_name") == "h264" and au[0].get("codec_name") == "aac"
+        and v.get("pix_fmt") == "yuv420p", f"{v.get('codec_name')}/{au[0].get('codec_name') if au else None}/{v.get('pix_fmt')}", 10)
+    fr = v.get("r_frame_rate", "0/1").split("/")
+    fps = float(fr[0]) / max(1.0, float(fr[1]))
+    chk("resolution, aspect and fps match the plan", (v.get("width"), v.get("height")) == (ctx.W, ctx.H) and abs(fps - ctx.fps) < 0.01,
+        f"{v.get('width')}x{v.get('height')}@{fps:g}", 10)
+    planned = sum(s["_dur"] for s in scenes)
+    chk("duration matches the plan (±0.2 s)", abs(dur - planned) <= 0.2, f"{dur:.2f}s vs {planned:.2f}s", 5)
+    blk = _ff(["-i", video, "-vf", "blackdetect=d=0.25:pic_th=0.985:pix_th=0.04", "-an", "-f", "null", "-"])
+    blacks = re.findall(r"black_start:([\d.]+) black_end:([\d.]+)", blk)
+    chk("no unplanned black frames (>0.25 s)", not blacks, [f"{a}-{b}" for a, b in blacks][:5], 10)
+    frz = _ff(["-i", video, "-vf", "freezedetect=n=-60dB:d=1.5", "-an", "-f", "null", "-"])
+    freezes = re.findall(r"freeze_start: ([\d.]+)", frz)
+    chk("no frozen picture (>1.5 s)", not freezes, freezes[:5], 5)
+    eb = _ff(["-i", video, "-af", "ebur128=peak=true", "-f", "null", "-"])
+    I = re.findall(r"I:\s+(-?[\d.]+) LUFS", eb)
+    tp = re.findall(r"Peak:\s+(-?[\d.]+) dBFS", eb)
+    lufs = float(I[-1]) if I else None
+    peak = float(tp[-1]) if tp else None
+    chk("loudness -16..-12 LUFS", lufs is not None and -16 <= lufs <= -12, lufs, 6)
+    chk("true peak <= -1.0 dBTP", peak is not None and peak <= -1.0, peak, 4)
+    sil = _ff(["-i", video, "-af", "silencedetect=n=-45dB:d=1.0", "-f", "null", "-"])
+    silences = re.findall(r"silence_start: ([\d.]+)", sil)
+    chk("no silent gaps (>1 s)", not silences, silences[:5], 5)
+    le, lw = layout_issues(scenes, ctx)
+    rep["errors"] += le
+    rep["warnings"] += lw
+    chk("no text or graphics cut off at the frame edge", not le, len(le), 5)
+    first = scenes[0] if scenes else {}
+    chk("hook: first scene is a hook-type scene and <= 3 s", first.get("type") in ("hook", "kinetic", "showcase", "location")
+        and first.get("_dur", 9) <= 3.0, f"{first.get('type')} {first.get('_dur', 0):.2f}s", 5)
+    last = scenes[-1] if scenes else {}
+    chk("ends on a CTA held >= 4 s", last.get("type") == "cta" and last.get("_dur", 0) >= 4.0, f"{last.get('type')} {last.get('_dur', 0):.2f}s", 5)
+    avg = planned / max(1, len(scenes))
+    chk("average shot 1.2-4.0 s", 1.2 <= avg <= 4.0, f"{avg:.2f}s", 5)
+    plat = PLATFORMS.get(brief.get("platform", ""))
+    if plat and not plat[2][0] <= dur <= plat[2][1]:
+        rep["warnings"].append(f"length {dur:.1f}s is outside the usual {plat[2][0]}-{plat[2][1]} s for {brief.get('platform')}")
+    rep["auto_points"] = pts
+    rep["auto_max"] = 75
+    if creative:
+        crit = ["hook strength", "clarity / readability", "pacing / rhythm", "aesthetics / brand", "message / CTA"]
+        sc_ = [max(0, min(5, float(x))) for x in creative][:5]
+        rep["creative"] = dict(zip(crit, sc_))
+        rep["score"] = round(pts + sum(sc_))
+    else:
+        rep["creative"] = None
+        rep["score"] = None
+        rep["score_auto_only"] = round(pts / 75 * 100)
+    if out_prefix:
+        sheet = out_prefix + "_qa_sheet.jpg"
+        subprocess.run([FFMPEG, "-v", "error", "-y", "-i", video, "-vf", "fps=1,scale=180:-1,tile=8x4", "-frames:v", "1", sheet])
+        rep["contact_sheet"] = sheet
+        md = [f"# QA report - {os.path.basename(video)}", "",
+              f"Automatic checks: **{pts}/75**" + (f" · creative review: **{sum(sc_):g}/25** · total **{rep['score']}/100**" if creative else
+                                                    " · creative review (25 pts) not scored yet"), "",
+              "| check | result | value | points |", "|---|---|---|---|"]
+        for c in rep["checks"]:
+            md.append(f"| {c['check']} | {'pass' if c['ok'] else 'FAIL'} | {c['value']} | {c['points']}/{c['max']} |")
+        if creative:
+            md += ["", "Creative review (reviewer's judgement, 0-5 each - subjective, not a measurement):", ""]
+            md += [f"- {k}: {v:g}/5" for k, v in rep["creative"].items()]
+        for title, lst in (("Errors", rep["errors"]), ("Warnings", rep["warnings"])):
+            if lst:
+                md += ["", f"## {title}", ""] + [f"- {x}" for x in lst]
+        md += ["", f"Contact sheet: {os.path.basename(sheet)}"]
+        open(out_prefix + "_qa.md", "w", encoding="utf-8").write("\n".join(md) + "\n")
+        json.dump(rep, open(out_prefix + "_qa.json", "w", encoding="utf-8"), ensure_ascii=False, indent=1, default=str)
+    return rep
+
+
+RUNS_LOG = os.path.expanduser("~/.cache/promo-reel/runs.jsonl")
+
+
+def log_run(brief_path, out, scenes, ctx, rep, secs):
+    """Production log for learning across jobs: one JSON line per render (never edits the skill itself)."""
+    os.makedirs(os.path.dirname(RUNS_LOG), exist_ok=True)
+    rec = {"time": __import__("time").strftime("%Y-%m-%d %H:%M"), "engine": VERSION, "brief": os.path.abspath(brief_path),
+           "out": os.path.abspath(out), "format": f"{ctx.W}x{ctx.H}", "scenes": [s["type"] for s in scenes],
+           "duration": round(sum(s["_dur"] for s in scenes), 2), "render_seconds": round(secs, 1),
+           "qa_auto": rep.get("auto_points") if rep else None, "qa_score": rep.get("score") if rep else None,
+           "errors": (rep or {}).get("errors", []), "warnings": (rep or {}).get("warnings", [])[:6]}
+    with open(RUNS_LOG, "a", encoding="utf-8") as f:
+        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+
+def history(n=10):
+    if not os.path.exists(RUNS_LOG):
+        print("no renders logged yet")
+        return
+    lines = open(RUNS_LOG, encoding="utf-8").read().strip().split("\n")[-n:]
+    for l in lines:
+        r = json.loads(l)
+        print(f"{r['time']}  v{r['engine']}  {os.path.basename(r['out'])}  {r['duration']}s  QA auto {r['qa_auto']}/75"
+              f"{'  total ' + str(r['qa_score']) if r['qa_score'] is not None else ''}  errors {len(r['errors'])}  {' > '.join(r['scenes'])}")
+
+
+def selftest(workers=2):
+    """Render every scene type at draft size from synthetic media, then run QA. Prints PASS/FAIL."""
+    import tempfile
+    d = tempfile.mkdtemp(prefix="promo_selftest_")
+    for i, col in enumerate(((40, 120, 200), (200, 140, 60), (60, 160, 110))):
+        g = np.linspace(0, 1, 900)[None, :, None] * np.array(col)[None, None, :] + np.linspace(0, 1, 600)[:, None, None] * 60
+        Image.fromarray(np.clip(g, 0, 255).astype(np.uint8)).save(os.path.join(d, f"p{i}.jpg"))
+    subprocess.run([FFMPEG, "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=720x1280:d=4", "-pix_fmt", "yuv420p",
+                    os.path.join(d, "v.mp4")])
+    t = np.arange(SR * 30) / SR
+    y = 0.4 * np.sin(2 * np.pi * 55 * (t % 0.5)) * np.exp(-(t % 0.5) * 18) + 0.08 * np.sin(2 * np.pi * 330 * t)
+    with wave.open(os.path.join(d, "m.wav"), "wb") as w:
+        w.setnchannels(2)
+        w.setsampwidth(2)
+        w.setframerate(SR)
+        w.writeframes((np.repeat(y[:, None], 2, 1) * 32767 * 0.8).astype(np.int16).tobytes())
+    # synthetic "voice": three voiced phrases separated by pauses, to exercise caption alignment
+    tv = np.arange(int(SR * 7.5)) / SR
+    env = sum(((tv > a) & (tv < b)).astype(float) for a, b in ((0.6, 2.0), (2.6, 3.8), (4.4, 6.2)))
+    vo = env * 0.3 * np.sin(2 * np.pi * 180 * tv) * (0.6 + 0.4 * np.sin(2 * np.pi * 4 * tv))
+    with wave.open(os.path.join(d, "vo.wav"), "wb") as w:
+        w.setnchannels(2)
+        w.setsampwidth(2)
+        w.setframerate(SR)
+        w.writeframes((np.repeat(vo[:, None], 2, 1) * 32767).astype(np.int16).tobytes())
+    brief = {"out": "selftest.mp4", "theme": {"preset": "tech", "type": "tech", "bg_style": "tech"}, "fps": 24,
+             "voiceover": {"file": "vo.wav", "text": "שלום לכולם. זה מבחן כתוביות, אוטומטי לגמרי.", "at": 0.5},
+             "music_free_version": True,
+             "brand": {"name": "בדיקה", "phone": "050-000-0000"}, "music": {"file": "m.wav", "volume": 0.8},
+             "scenes": [
+                 {"type": "kinetic", "kicker": "SELF TEST", "lines": ["שורה ראשונה", {"text": "מודגש", "style": "accent"}], "dur": 1.2},
+                 {"type": "hook", "style": "box", "small": "תווית", "icon": "pin", "big": "כותרת", "clip": "p0.jpg", "dur": 1.0},
+                 {"type": "showcase", "label": "סלון", "icon": "home", "title": "מול הנוף", "clip": {"src": "p1.jpg", "move": "pan_left"}, "dur": 1.0},
+                 {"type": "showcase", "style": "words", "title": "וידאו אמיתי", "clip": "v.mp4", "dur": 1.0, "transition": "leak"},
+                 {"type": "location", "place": "מקום", "title": "כותרת", "clip": "p2.jpg", "dur": 1.2},
+                 {"type": "features", "items": [{"icon": "wifi", "text": "אחד"}, {"icon": "snow", "text": "שתיים"}], "dur": 1.4},
+                 {"type": "cards", "title": "כרטיסים", "items": [{"icon": "home", "title": "אתרים"}, {"icon": "people", "title": "CRM"}], "dur": 1.4},
+                 {"type": "steps", "title": "תהליך", "items": [{"title": "שלב"}, {"title": "שלב"}], "dur": 1.4},
+                 {"type": "device", "ui": "flow", "title": "מכשיר", "dur": 1.4},
+                 {"type": "logo", "dur": 1.0},
+                 {"type": "cta", "headline": "צרו קשר", "dur": 1.6}]}
+    bp = os.path.join(d, "brief.json")
+    json.dump(brief, open(bp, "w"), ensure_ascii=False)
+    t0 = __import__("time").time()
+    cwd = os.getcwd()
+    try:
+        run(bp, os.path.join(d, "selftest.mp4"), "9x16", True, workers, False, None, cleanup=True, creative=None, do_qa=True)
+    finally:
+        os.chdir(cwd)
+    rep = json.load(open(os.path.join(d, "selftest_qa.json"))) if os.path.exists(os.path.join(d, "selftest_qa.json")) else {}
+    os.chdir(d)
+    caps = build_captions(brief)
+    os.chdir(cwd)
+    print("captions:", " | ".join(f"{c['s']:.2f}-{c['e']:.2f} {c['text']}" for c in caps))
+    extra_ok = len(caps) >= 3 and caps[0]["s"] >= 0.9 and os.path.exists(os.path.join(d, "selftest_no_music.mp4"))
+    if not extra_ok:
+        rep.setdefault("errors", []).append("voiceover captions or the no-music version missing")
+    hard = [c["check"] for c in rep.get("checks", []) if not c["ok"] and c["check"] not in
+            ("hook: first scene is a hook-type scene and <= 3 s", "ends on a CTA held >= 4 s", "average shot 1.2-4.0 s",
+             "duration matches the plan (±0.2 s)", "loudness -16..-12 LUFS", "true peak <= -1.0 dBTP")]
+    ok = os.path.exists(os.path.join(d, "selftest.mp4")) and not hard and not rep.get("errors")
+    print(f"SELFTEST {'PASS' if ok else 'FAIL'} in {__import__('time').time() - t0:.0f}s  ({d})")
+    for c in rep.get("checks", []):
+        print(f"  {'ok ' if c['ok'] else 'XX '} {c['check']}: {c['value']}")
+    for e in rep.get("errors", []):
+        print("  error:", e)
+    return 0 if ok else 1
+
+
 # ----------------------------------------------------------------- main
-def run(brief_path, out, fmt, draft, workers, preview, frame_at, workdir=None, cleanup=True):
-    brief = json.load(open(brief_path))
+def run(brief_path, out, fmt, draft, workers, preview, frame_at, workdir=None, cleanup=True, creative=None, do_qa=True,
+        plan=False):
+    import time as _time
+    t_start = _time.time()
+    brief = load_brief(brief_path)
     base_dir = os.path.dirname(os.path.abspath(brief_path))
     os.chdir(base_dir)
+    errs, warns = validate(brief)
+    for w_ in warns:
+        log("[warn] " + w_)
+    if errs:
+        for e_ in errs:
+            log("[error] " + e_)
+        raise SystemExit(2)
     ctx = Ctx(brief, fmt, draft)
     for r in ctx.ts.values():
         font_path(r[0])
+    ctx.captions = build_captions(brief)
     stem = os.path.splitext(out)[0]
     workdir = workdir or stem + "_work"
     os.makedirs(workdir, exist_ok=True)
@@ -1752,6 +3618,14 @@ def run(brief_path, out, fmt, draft, workers, preview, frame_at, workdir=None, c
         log(f"  {i:02d} {s['_t0']:5.2f}s +{s['_dur']:.2f}s {s['type']:<12} {s.get('transition'):<8} "
             f"{(s.get('clip') or {}).get('src', '') if isinstance(s.get('clip'), dict) else ''}")
     json.dump(scenes, open(os.path.join(workdir, "plan.json"), "w"), ensure_ascii=False, indent=1, default=str)
+    if plan:
+        print(storyboard(scenes, brief, ctx, stem + "_storyboard.md"))
+        le, lw = layout_issues(scenes, ctx)
+        for x in le:
+            log("[layout error] " + x)
+        for x in lw:
+            log("[layout warn] " + x)
+        return
     if frame_at is not None:
         for fa in [float(x) for x in str(frame_at).split(",") if x.strip()]:
             for i, s in enumerate(scenes):
@@ -1806,40 +3680,103 @@ def run(brief_path, out, fmt, draft, workers, preview, frame_at, workdir=None, c
                     "-af", "loudnorm=I=-14:TP=-1.5:LRA=11", "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
                     "-shortest", "-movflags", "+faststart", tmp], check=True)
     os.replace(tmp, out)
-    cov = next(frames(scenes[0], ctx, k0=min(scenes[0]["_n"] - 1, int(scenes[0]["_n"] * 0.7)), count=1))
+    if brief.get("music_free_version"):
+        nm = stem + "_no_music.mp4"
+        b2 = dict(brief)
+        b2.pop("music", None)
+        wav2 = os.path.join(workdir, "mix_nomusic.wav")
+        build_audio(b2, scenes, ctx, wav2)
+        subprocess.run([FFMPEG, "-y", "-v", "error", "-i", vid, "-i", wav2, "-map", "0:v", "-map", "1:a", "-c:v", "copy",
+                        "-af", "loudnorm=I=-16:TP=-1.5:LRA=11", "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
+                        "-shortest", "-movflags", "+faststart", nm], check=True)
+        print(nm)
+    ci = min(len(scenes) - 1, int(brief.get("cover_scene", 0)))
+    cov = next(frames(scenes[ci], ctx, k0=min(scenes[ci]["_n"] - 1, int(scenes[ci]["_n"] * 0.7)), count=1))
     Image.fromarray(cov).save(stem + "_cover.jpg", quality=92)
     if cleanup:
         keep = {os.path.abspath(p) for p in paths}
         for f in glob.glob(os.path.join(workdir, "s[0-9][0-9]_*.mp4")):
             if os.path.abspath(f) not in keep:
                 os.remove(f)
+        keep_last = {p[:-4] + "_last.png" for p in keep}
+        for f in glob.glob(os.path.join(workdir, "s[0-9][0-9]_*_last.png")):
+            if os.path.abspath(f) not in keep_last:
+                os.remove(f)
     print(out)
+    rep = None
+    if do_qa and brief.get("qa", True):
+        rep = qa(out, brief, scenes, ctx, creative, stem)
+        log(f"[qa] automatic {rep['auto_points']}/75" + (f", total {rep['score']}/100" if rep.get("score") is not None else
+                                                          " (creative review pending)") +
+            f", {len(rep['errors'])} errors, {len(rep['warnings'])} warnings -> {stem}_qa.md")
+    try:
+        log_run(brief_path, out, scenes, ctx, rep, _time.time() - t_start)
+    except Exception as ex:
+        log(f"[log] could not write the production log: {ex}")
+
+
+def qa_only(brief_path, video, fmt, draft, creative):
+    brief = load_brief(brief_path)
+    os.chdir(os.path.dirname(os.path.abspath(brief_path)))
+    validate(brief)
+    ctx = Ctx(brief, fmt, draft)
+    ctx.captions = build_captions(brief)
+    stem = os.path.splitext(video)[0]
+    scenes = make_plan(brief, ctx, stem + "_work" if os.path.isdir(stem + "_work") else os.path.dirname(os.path.abspath(video)))
+    rep = qa(video, brief, scenes, ctx, creative, stem)
+    print(stem + "_qa.md")
+    print(json.dumps({k: rep[k] for k in ("auto_points", "score", "creative", "errors", "warnings") if k in rep}, ensure_ascii=False, indent=1))
 
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("brief")
+    ap = argparse.ArgumentParser(description="promo_engine v" + VERSION)
+    ap.add_argument("brief", nargs="?")
     ap.add_argument("--out")
     ap.add_argument("--format")
     ap.add_argument("--draft", action="store_true", help="half resolution, fast encode")
     ap.add_argument("--preview", action="store_true", help="contact sheet only")
     ap.add_argument("--frame", help="render full-size frames at these seconds, e.g. 1.5,8,20")
+    ap.add_argument("--plan", action="store_true", help="write <out>_storyboard.md and check the layout, no render")
+    ap.add_argument("--qa", metavar="VIDEO", help="run QA on an already rendered video")
+    ap.add_argument("--creative", help="reviewer scores 0-5: hook,clarity,pacing,aesthetics,message e.g. 5,4,5,4,5")
+    ap.add_argument("--no-qa", action="store_true")
+    ap.add_argument("--new", choices=sorted(TEMPLATES), help="print a starter brief")
+    ap.add_argument("--brand-from", metavar="DIR", help="extract a brand kit from a website folder/repo")
+    ap.add_argument("--kit", default="brand_kit.json", help="output path for --brand-from")
+    ap.add_argument("--selftest", action="store_true")
+    ap.add_argument("--history", action="store_true", help="show the production log")
     ap.add_argument("--workers", type=int, default=max(1, min(4, os.cpu_count() or 2)))
     ap.add_argument("--variant", help="name of a variant in brief['variants'] to apply")
     a = ap.parse_args()
-    brief = json.load(open(a.brief))
+    if a.selftest:
+        sys.exit(selftest(a.workers))
+    if a.history:
+        return history()
+    if a.new:
+        print(json.dumps(TEMPLATES[a.new], ensure_ascii=False, indent=1))
+        return
+    if a.brand_from:
+        brand_from(a.brand_from, a.kit)
+        return
+    if not a.brief:
+        ap.error("a brief.json is required")
+    creative = [x for x in a.creative.split(",")] if a.creative else None
+    brief = load_brief(a.brief)
     fmts = [a.format] if a.format else brief.get("formats", [brief.get("format", "9x16")])
+    if a.qa:
+        return qa_only(a.brief, os.path.abspath(a.qa), fmts[0], a.draft, creative)
     variants = [None]
     if a.variant:
         variants = [a.variant]
-    elif brief.get("variants") and not (a.preview or a.frame is not None):
+    elif brief.get("variants") and not (a.preview or a.frame is not None or a.plan):
         variants = [None] + [v["name"] for v in brief["variants"]]
+    raw = json.load(open(a.brief, encoding="utf-8"))
     for fmt in fmts:
         for var in variants:
             bp = os.path.abspath(a.brief)
             if var:
-                b2 = json.loads(json.dumps(brief))
-                v = next(v for v in brief["variants"] if v["name"] == var)
+                b2 = json.loads(json.dumps(raw))
+                v = next(v for v in raw["variants"] if v["name"] == var)
                 for idx, ov in v.get("scenes", {}).items():
                     b2["scenes"][int(idx)].update(ov)
                 bp = os.path.join(os.path.dirname(bp), f".brief_{var}.json")
@@ -1853,7 +3790,8 @@ def main():
             wd = stem + "_work"
             if var:
                 stem += "_" + var
-            run(bp, stem + ext, fmt, a.draft, a.workers, a.preview, a.frame, wd, cleanup=len(variants) == 1)
+            run(bp, stem + ext, fmt, a.draft, a.workers, a.preview, a.frame, wd, cleanup=len(variants) == 1,
+                creative=creative, do_qa=not a.no_qa, plan=a.plan)
 
 
 if __name__ == "__main__":
