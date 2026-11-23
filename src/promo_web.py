@@ -50,7 +50,7 @@ def find_chrome():
 
 def esc(s):
     # a hyphen between two words (ו-ERP, e-commerce) must not become a line break
-    return _html.escape(re.sub(r"(?<=[^\W\d_])-(?=\S)|(?<=\S)-(?=[^\W\d_])", "\u2011", str(s)), quote=True)
+    return _html.escape(re.sub(r"(?<=[^\W\d_])-(?=\S)|(?<=\S)-(?=[^\W\d_])", "‑", str(s)), quote=True)
 
 
 def hexc(c):
