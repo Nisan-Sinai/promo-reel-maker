@@ -1,0 +1,233 @@
+{
+ "out": "nst_voice.mp4",
+ "platform": "reels",
+ "brand_kit": "brand_kit.json",
+ "theme": {
+  "preset": "tech",
+  "type": "tech",
+  "bg_style": "tech",
+  "grade": "bright"
+ },
+ "brand": {
+  "website": "nisan-sinai-technologies.vercel.app",
+  "corner_logo": true
+ },
+ "music": {
+  "file": "assets/sfx/music_edit.wav",
+  "volume": 0.8
+ },
+ "scenes": [
+  {
+   "type": "kinetic",
+   "lines": [
+    "העסק שלך",
+    "עדיין רץ על",
+    {
+     "text": "אקסל?",
+     "style": "accent",
+     "size": 170
+    }
+   ],
+   "beats": 5,
+   "say": "העסק שלך עדיין רץ על אקסל?"
+  },
+  {
+   "type": "contrast",
+   "items": [
+    {
+     "text": "אקסל",
+     "mark": "x",
+     "size": 92
+    },
+    {
+     "text": "וואטסאפים",
+     "mark": "x",
+     "size": 92
+    },
+    {
+     "text": "מערכת אחת",
+     "mark": "check",
+     "size": 112
+    }
+   ],
+   "prompt": "אני צריך אתר עם הזמנות אונליין",
+   "prompt_at": 0.3,
+   "cps": 15,
+   "say": "במקום אקסל ועשרות הודעות בוואטסאפ, מערכת אחת שמסדרת את הכול."
+  },
+  {
+   "type": "gallery",
+   "device": "phone",
+   "kicker": "אתרים וחנויות",
+   "per": 1.45,
+   "label_size": 50,
+   "items": [
+    {
+     "src": "shots/m_ld_hero.jpg",
+     "label": "אתר ומערכת הזמנות",
+     "tag": "LD Event Design",
+     "icon": "calendar",
+     "pop": false
+    },
+    {
+     "src": "shots/m_ld_products.jpg",
+     "label": "קטלוג וסל הזמנה",
+     "tag": "LD Event Design",
+     "icon": "cart",
+     "pop": {
+      "box": [
+       0.513953488372093,
+       0.21888412017167383,
+       0.9627906976744186,
+       0.7328326180257511
+      ],
+      "radius": 0.06511627906976744,
+      "scale": 1.4
+     }
+    },
+    {
+     "src": "shots/m_sy_hero.jpg",
+     "label": "חנות אונליין",
+     "tag": "Shel-Yah · פרויקט הדגמה",
+     "icon": "cart",
+     "pop": false
+    },
+    {
+     "src": "shots/m_sy_products.jpg",
+     "label": "מוצרים נבחרים",
+     "tag": "Shel-Yah · פרויקט הדגמה",
+     "icon": "cart",
+     "pop": {
+      "box": [
+       0.037209302325581395,
+       0.1459227467811159,
+       0.9627906976744186,
+       0.7886266094420601
+      ],
+      "radius": 0.06511627906976744,
+      "scale": 1.15
+     }
+    }
+   ],
+   "say": "אתרים וחנויות אונליין, עם קטלוג, סל קניות והזמנות."
+  },
+  {
+   "type": "gallery",
+   "device": "laptop",
+   "kicker": "מערכות",
+   "per": 1.7,
+   "label_size": 80,
+   "items": [
+    {
+     "src": "shots/d_rsvp_hero.jpg",
+     "label": "פלטפורמת אישורי הגעה",
+     "tag": "מערכת אישורי הגעה",
+     "icon": "calendar",
+     "pop": {
+      "box": [
+       0.3173913043478261,
+       0.2765647743813683,
+       0.4591304347826087,
+       0.3551673944687045
+      ],
+      "radius": 0.023478260869565216,
+      "scale": 2.6
+     }
+    },
+    {
+     "src": "shots/d_rsvp_dash.jpg",
+     "label": "דשבורד בזמן אמת",
+     "tag": "מערכת אישורי הגעה",
+     "icon": "chart",
+     "pop": {
+      "box": [
+       0.05565217391304348,
+       0.4861717612809316,
+       0.4547826086956522,
+       0.9534206695778749
+      ],
+      "radius": 0.020869565217391306,
+      "scale": 1.7
+     }
+    }
+   ],
+   "say": "ומערכות שעובדות בשבילך, כמו אישורי הגעה ודשבורד בזמן אמת."
+  },
+  {
+   "type": "wall",
+   "title": "מערכות שכבר עובדות בעולם האמיתי.",
+   "title_size": 92,
+   "title_highlight": [
+    "עובדות"
+   ],
+   "images": [
+    "shots/ld_hero.jpg",
+    "shots/ld_form.jpg",
+    "shots/ld_items.jpg",
+    "shots/ld_catalog.jpg",
+    "shots/shelyah_hero.jpg",
+    "shots/shelyah_products.jpg",
+    "shots/rsvp_hero.jpg",
+    "shots/rsvp_demo.jpg",
+    "shots/nst_hero.jpg",
+    "shots/nst_services.jpg"
+   ],
+   "tile_w": 0.5,
+   "tile_ratio": 0.4525,
+   "cols": 4,
+   "rows": 9,
+   "wall_dim": 0.75,
+   "dur": 3.4,
+   "say": "מערכות שכבר עובדות בעולם האמיתי."
+  },
+  {
+   "type": "bundle",
+   "title": "מה אני בונה",
+   "title_size": 100,
+   "items": [
+    {
+     "title": "אתרים וחנויות אונליין",
+     "text": "אתרי תדמית, דפי נחיתה וחנויות מהירות",
+     "image": "shots/m_sy_hero.jpg",
+     "tags": [
+      "UX/UI",
+      "E-commerce",
+      "SEO"
+     ],
+     "size": 70
+    },
+    {
+     "title": "מערכות CRM ו-ERP",
+     "text": "לקוחות, לידים, הזמנות ותפעול במערכת אחת",
+     "image": "shots/d_rsvp_dash.jpg",
+     "tags": [
+      "Leads",
+      "Operations",
+      "Reports"
+     ],
+     "size": 70
+    }
+   ],
+   "say": "אתרים, חנויות, ומערכות סי־אר־אם ואי־אר־פי, בהתאמה לעסק שלך."
+  },
+  {
+   "type": "cta",
+   "logo": true,
+   "eyebrow": "יש לך רעיון?",
+   "eyebrow_size": 68,
+   "headline": "בואו נבנה משהו מעולה",
+   "headline_size": 118,
+   "button": "שלחו הודעה בוואטסאפ",
+   "beats": 10,
+   "say": "יש לך רעיון? שלח הודעה, ובוא נבנה משהו מעולה."
+  }
+ ],
+ "renderer": "web",
+ "voiceover": {
+  "tts": {
+   "engine": "elevenlabs",
+   "voice": "nPczCjzI2devNBz1zQrb"
+  },
+  "caption_size": 58
+ }
+}

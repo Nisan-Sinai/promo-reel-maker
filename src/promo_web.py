@@ -28,7 +28,7 @@ from PIL import Image
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import promo_engine as pe  # noqa: E402
 
-WEB_VERSION = "4.0.0"
+WEB_VERSION = "4.1.0"
 WEB_TYPES = {"kinetic", "contrast", "gallery", "wall", "bundle", "cta", "logo", "counter", "stat", "stats", "title"}
 TRANS_MAP = {"cut": "cut", "flash": "flash", "punch": "zoom_through", "fade": "fade", "zoom": "zoom_through",
              "whip": "push", "slide": "push", "slide_up": "push_up", "glitch": "zoom_through", "blur": "blur",
@@ -231,6 +231,21 @@ window.seek = function (t) {
   }
   const cl = $('cornerlogo');
   if (cl) cl.style.opacity = cur.corner ? clamp(lt / 0.5) * 0.92 : 0;
+  const C = window.__caps || [];
+  for (let k = 0; k < C.length; k++) {
+    const c = C[k], el = $('cap' + k);
+    const on = t >= c.s && t < c.e;
+    el.style.display = on ? 'inline-block' : 'none';
+    if (!on) continue;
+    const p = clamp((t - c.s) / 0.14), q = clamp((c.e - t) / 0.1);
+    el.style.opacity = Math.min(p, q);
+    el.style.transform = `translateY(${(1 - expoOut(p)) * 18 * U}px) scale(${lerp(0.94, 1, expoOut(p))})`;
+    el.querySelectorAll('.cw').forEach((w, j) => {
+      const [, a, b] = c.w[j] || [0, c.s, c.e];
+      w.classList.toggle('on', t >= a - 0.02);
+      w.classList.toggle('now', t >= a - 0.02 && t < b + 0.05);
+    });
+  }
   return i;
 };
 
@@ -279,6 +294,15 @@ html, body { margin: 0; width: __W__px; height: __H__px; overflow: hidden; backg
   z-index: 30; opacity: 0; }
 .grad .w, .grad:not(:has(.w)) { background: linear-gradient(180deg, var(--hi) 0%, var(--primary) 45%, var(--primary2) 100%);
   -webkit-background-clip: text; background-clip: text; color: transparent; }
+#caps { position: absolute; left: 5%; right: 5%; z-index: 36; display: flex; justify-content: center; pointer-events: none;
+  transform: translateY(-50%); }
+.capbox { display: none; padding: .26em .62em .32em; border-radius: .42em; background: rgba(10,12,22,.9);
+  box-shadow: 0 calc(18px*var(--u)) calc(44px*var(--u)) rgba(0,0,0,.45), inset 0 0 0 1px rgba(255,255,255,.12);
+  font-family: 'R-heavy'; font-weight: 800; line-height: 1.12; color: #fff; text-align: center; direction: rtl;
+  text-wrap: balance; max-width: 100%; will-change: transform, opacity; }
+.capbox .cw { display: inline-block; opacity: .5; }
+.capbox .cw.on { opacity: 1; }
+.capbox .cw.now { color: var(--primary); }
 .sheen { position: absolute; top: -20%; bottom: -20%; width: 34%; left: 33%; opacity: 0; pointer-events: none;
   background: linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,.38), rgba(255,255,255,0)); }
 """
@@ -944,17 +968,29 @@ def build_page(scenes, brief, ctx, wd):
         layers.append(f'<div class="scene" id="S{i}">{r["html"]}</div>')
         defs.append(f"{{t0: {sc['_t0']:.4f}, d: {sc['_dur']:.4f}, tr: '{kind}', td: {td:.3f}, el: $('S{i}'), corner: "
                     f"{'true' if r.get('corner', True) else 'false'}, fn: {r['js']}}}")
+    caps_html, caps_js = "", "[]"
+    if ctx.captions:
+        vo = brief.get("voiceover") or {}
+        size = float(vo.get("caption_size", 64)) * P_.U
+        cy = float(vo["caption_y"]) * P_.H if vo.get("caption_y") else P_.bot - size * 1.45 * 0.6
+        words = getattr(ctx, "caption_words", None) or [[[w, c["s"], c["e"]] for w in c["text"].split()] for c in ctx.captions]
+        boxes = []
+        for k, (c, ws) in enumerate(zip(ctx.captions, words)):
+            boxes.append(f'<div class="capbox" id="cap{k}">' + " ".join(f'<span class="cw">{esc(w[0])}</span>' for w in ws) + "</div>")
+        caps_html = f'<div id="caps" style="top:{cy:.0f}px;font-size:{size:.1f}px">{"".join(boxes)}</div>'
+        caps_js = json.dumps([{"s": c["s"], "e": c["e"], "w": ws} for c, ws in zip(ctx.captions, words)], ensure_ascii=False)
     corner = ""
     if ctx.brand.get("corner_logo"):
         url, _ = _logo_url(P_)
         corner = f'<img id="cornerlogo" src="{url}">'
     page = f"""<!doctype html><html dir="rtl" lang="he"><head><meta charset="utf-8"><style>{css}</style></head><body>
-<div id="stage">{bg_html}<div id="scenes">{"".join(layers)}</div>{corner}<div id="ring"></div><div class="vig"></div><div class="grain"></div>
+<div id="stage">{bg_html}<div id="scenes">{"".join(layers)}</div>{corner}{caps_html}<div id="ring"></div><div class="vig"></div><div class="grain"></div>
 <div id="flash"></div></div>
 <script>window.__U = {P_.U:.5f}; window.__W = {P_.W}; window.__H = {P_.H};
 {RUNTIME}
 {bg_js}
 window.__scenes = [{",".join(defs)}];
+window.__caps = {caps_js};
 window.seek(0);
 </script></body></html>"""
     path = os.path.join(wd, "web", "index.html")
@@ -1093,10 +1129,9 @@ def run_web(brief_path, out, fmt, draft, workers, preview, frame_at, workdir=Non
     base_dir = os.path.dirname(os.path.abspath(brief_path))
     os.chdir(base_dir)
     bad = unsupported(brief)
-    if bad or brief.get("voiceover", {}).get("captions"):
-        why = f"scene types {', '.join(bad)}" if bad else "voiceover captions"
+    if bad:
         return classic(brief_path, out, fmt, draft, workers, preview, frame_at, workdir, creative, do_qa, plan,
-                       f"the web renderer does not support {why} yet")
+                       f"the web renderer does not support scene types {', '.join(bad)} yet")
     if plan:
         return pe.run(brief_path, out, fmt, draft, workers, preview, frame_at, workdir, creative=creative, do_qa=do_qa, plan=True)
     prob = browser_problem()
@@ -1114,7 +1149,11 @@ def run_web(brief_path, out, fmt, draft, workers, preview, frame_at, workdir=Non
     stem = os.path.splitext(out)[0]
     workdir = workdir or stem + "_work"
     os.makedirs(workdir, exist_ok=True)
-    scenes = pe.make_plan(brief, ctx, workdir)
+    try:
+        scenes = pe.plan_with_narration(brief, ctx, workdir, base_dir)
+    except pe.TTSError as e:
+        pe.log(f"[error] narration: {e}")
+        raise SystemExit(2)
     total = sum(s["_dur"] for s in scenes)
     pe.log(f"[plan] {len(scenes)} scenes, {total:.1f}s, {ctx.W}x{ctx.H}@{ctx.fps} (web renderer {WEB_VERSION})")
     for i, s in enumerate(scenes):

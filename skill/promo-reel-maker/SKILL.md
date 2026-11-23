@@ -17,6 +17,8 @@ Version 3.2 adds motion styles (`fx`). `premium`: smooth, cinematic motion - ele
 
 Version 4 adds a second renderer, `"renderer": "web"`. The same engine plans the video, snaps it to the beat, mixes the sound, makes the cover and runs QA, but every frame of the motion-graphics scenes (kinetic, title, contrast, gallery, wall, bundle, counter/stat, logo, cta) is drawn by Chrome: real CSS 3D (phones and laptops that turn, cards that lift off the screen), sub-pixel motion with motion blur, sharp type and soft shadows. It is clearly more polished than the classic renderer and is the recommended choice for Formula D. It needs Playwright and a Chrome or Chromium browser in the workspace; when they are missing, or a brief uses a scene type it does not draw yet, the video renders with the classic renderer in the premium style automatically. The classic renderer and every older brief are unchanged.
 
+Version 4.1 adds generated narration: write a line for a scene (`"say"`) and the engine voices the whole script with ElevenLabs or Google's Gemini text-to-speech (both have free tiers), places each line on its scene, makes the scene long enough for it, ducks the music under the voice and shows word-by-word captions - in both renderers. A recorded voiceover still works as before.
+
 ## 0. Setup (once per session)
 
 1. Extract the engine and the web renderer from this SKILL.md (no retyping). The skill's base directory is given when the skill loads; if not, find it with `find / -name SKILL.md -path "*promo-reel-maker*" 2>/dev/null | head -1`.
@@ -38,7 +40,8 @@ python3 -m py_compile ~/.cache/promo-reel/promo_engine.py ~/.cache/promo-reel/pr
 2. Check tools: `ffmpeg -version`, `python3 -c "import numpy, PIL; from PIL import features; print(features.check('raqm'))"`. If raqm is False: `pip install python-bidi --break-system-packages` (needed for correct Hebrew order). scipy is optional (only for synthesized fallback SFX); `qrcode` only if a QR is wanted.
 3. Fonts (Rubik, Heebo, Secular One, Frank Ruhl, Assistant, Rubik Dirt, Suez One, Karantina, Fredoka, Varela Round, Noto Sans Hebrew, Geist, Geist Mono) download automatically from Google Fonts on GitHub into ~/.cache/promo_fonts; if blocked, the engine falls back to local Hebrew fonts.
 4. Web renderer (needed only for `"renderer": "web"`): `python3 -c "import playwright" 2>/dev/null || pip install playwright --break-system-packages`, then `python3 ~/.cache/promo-reel/promo_web.py --check`. It uses a system Chrome (`/usr/bin/google-chrome`, Chromium, or the path in the `CHROME` environment variable). If it reports that no browser could start, try `python3 -m playwright install chromium` once; if the download is blocked, carry on - briefs with `"renderer": "web"` then render with the classic renderer in the premium style, and tell the user the video used the fallback.
-5. Optional (about 1-2 minutes): `python3 $E --selftest` renders every scene type from synthetic media at draft size three times - as is, with `fx` energy 3 (every transition, camera hits, pop-outs), and with the web renderer (skipped, with the reason, when Chrome is not available) - and runs QA on each. It must print `fx pass: ok`, `web pass: ok` (or `skipped`) and `SELFTEST PASS` (the short test CTA is expected to miss the 4 s rule). Run it after any change to the engine.
+5. Narration (needed only for generated narration, section 4b): an API key for the engine the brief uses. ElevenLabs: elevenlabs.io > Developers > API keys (a free account; a restricted key with Text to Speech access and Voices read is enough), read from `ELEVENLABS_API_KEY` or `~/.config/promo-reel/elevenlabs_key`. Gemini: aistudio.google.com > Get API key (free, no credit card), read from `GEMINI_API_KEY` or `~/.config/promo-reel/gemini_key`. When the user gives a key in the conversation, or asks Claude to create one in their signed-in browser, write it to that file (`mkdir -p ~/.config/promo-reel && chmod 700 ~/.config/promo-reel`, then the file with mode 600) and never put it in a brief, a log, a commit, memory or a reply. The workspace must be allowed to reach `api.elevenlabs.io` / `generativelanguage.googleapis.com`; if the engine reports that the network blocks it, ask the user to add the domain under claude.ai/settings/capabilities > Create and edit files > Allowed websites > Manage - Claude does not change network settings itself.
+6. Optional (about 1-2 minutes): `python3 $E --selftest` renders every scene type from synthetic media at draft size three times - as is, with `fx` energy 3 (every transition, camera hits, pop-outs), and with the web renderer (skipped, with the reason, when Chrome is not available) - and runs QA on each. The web pass also voices three scene lines with an offline stand-in voice (no key needed) to check narration timing and captions. It must print `fx pass: ok`, `web pass: ok` (or `skipped`) and `SELFTEST PASS` (the short test CTA is expected to miss the 4 s rule). Run it after any change to the engine.
 
 Below, `E=~/.cache/promo-reel/promo_engine.py`.
 
@@ -169,7 +172,7 @@ Two independent choices, both optional:
 Hype levels: 1 - a zoom punch, camera shake and a brief colour split on every cut and impact sound; 2 - level 1 stronger, a punch on every beat, glitch bands on hits, light streaks and a ring burst on brand backgrounds, elements that slam in with a motion trail and keep bouncing to the beat, transitions rotated through cube, zoom_blur, slices, spin, shape, whip, diamond and glitch, a thump under each cut; 3 - level 2 at full strength with a white flash on hits. A calm scene can opt out with `"fx": false`. Feedback from real use: viewers read hype as amateurish when it runs for a whole ad - prefer premium (or the web renderer) for brands, and use hype only when the user asks for it.
 
 Web renderer details:
-- Draws: kinetic, title, contrast, gallery (phone or laptop, with pop-outs), wall, bundle, counter / stat / stats, logo, cta. Any other scene type, or voiceover captions, sends the whole brief to the classic renderer (premium style) with a log line saying why - mixing renderers inside one video is not supported.
+- Draws: kinetic, title, contrast, gallery (phone or laptop, with pop-outs), wall, bundle, counter / stat / stats, logo, cta, plus narration and voiceover captions (word by word, the spoken word in the theme colour). Any other scene type sends the whole brief to the classic renderer (premium style) with a log line saying why - mixing renderers inside one video is not supported.
 - Transitions: push, push_up, zoom_through, cube, shape, diamond, fade, blur, flash, cut; the classic names map onto them (zoom, punch, spin, glitch → zoom_through; whip, slide → push; slide_up, slices → push_up; leak → fade).
 - Top-level fields: `motion_blur` (samples per frame, 4; 1 with `--draft`; only moving frames take extra samples), `shutter` (0.5 of a frame).
 - Same commands as the classic renderer (`--plan`, `--preview`, `--frame`, `--draft`, `--qa`), same QA, cover and music-free version. Pop-outs are kept inside the frame automatically (a too-large `scale` is reduced). It has no scene cache: every full render redraws every frame, so look at `--frame` stills first.
@@ -237,7 +240,30 @@ Formula D scenes also fire: pop (✕ tags, quote cards), thump (the ✓ tag), cl
 
 More options: Soundza pack `video-editing-sound-effects-whooshes-pops-clicks-glitches-and-camera-shutters`. Any SFX file that is missing falls back to a synthesized version, so a video never ships silent. When the video is published, suggest (optional) crediting soundza.com.
 
-Voiceover and captions: there is no text-to-speech in this engine; check whether the session has a TTS tool, and if not, ask the user for a recorded voiceover (phone recording is fine) plus its exact text. Brief: `"voiceover": {"file": "assets/vo.wav", "text": "<exact words>", "at": 0.3, "volume": 1.0}`. The engine aligns the words to the recording without a speech model (phrases, split at punctuation, are matched to the stretches of speech between pauses, and words are spread by length inside each phrase - so punctuate the text where the speaker pauses), shows them as boxed captions 1-3 words at a time in the safe band, and ducks the music under the voice. Check the caption timing on `--frame` stills at a few spoken moments; if a caption runs early or late, split the text at the pause or adjust `at`. Fields: `words_per_caption` (3), `caption_chars` (18), `caption_size` (64), `caption_y` (centre as a fraction of the height; default just inside the bottom of the safe band), `captions` (true). With captions on, keep scene text at `pos` top or center - `--plan` warns about every scene whose text sits under the captions. Never guess what someone says in a recording - captions come only from text the user gave.
+Voiceover and captions from a recording: when the user has a recorded voiceover (a phone recording is fine), ask for it plus its exact text; for a generated voice see section 4b. Brief: `"voiceover": {"file": "assets/vo.wav", "text": "<exact words>", "at": 0.3, "volume": 1.0}`. The engine aligns the words to the recording without a speech model (phrases, split at punctuation, are matched to the stretches of speech between pauses, and words are spread by length inside each phrase - so punctuate the text where the speaker pauses), shows them as boxed captions 1-3 words at a time in the safe band, and ducks the music under the voice. Check the caption timing on `--frame` stills at a few spoken moments; if a caption runs early or late, split the text at the pause or adjust `at`. Fields: `words_per_caption` (3), `caption_chars` (18), `caption_size` (64), `caption_y` (centre as a fraction of the height; default just inside the bottom of the safe band), `captions` (true). With captions on, keep scene text at `pos` top or center - `--plan` warns about every scene whose text sits under the captions. Never guess what someone says in a recording - captions come only from text the user gave.
+
+## 4b. Narration (generated voice)
+
+For a narrated ad, write one short spoken line per scene in the scene's `say` field (Hebrew unless asked otherwise). The engine sends the whole script to the text-to-speech engine in one take, so the voice and energy stay consistent, cuts it at the pauses between lines and puts each line on its scene `lead` seconds after the cut (0.15 s; 0.3 s on the first scene; per scene `say_at`). A scene that is shorter than its line plus `tail` (0.35 s) is lengthened, then snapped to the beat as usual - so the narration sets the pace. Captions follow each line word by word unless `voiceover.captions` is false. The take is cached (`~/.cache/promo-reel/tts/`) by script, voice and style, so re-renders, drafts and frame stills do not spend the free quota; changing one line regenerates the take.
+
+```json
+"voiceover": {"tts": {"engine": "elevenlabs", "voice": "nPczCjzI2devNBz1zQrb"}, "duck": 0.7, "caption_size": 60},
+"scenes": [
+  {"type": "kinetic", "lines": ["העסק שלך", "עדיין רץ על", {"text": "אקסל?", "style": "accent"}], "say": "העסק שלך עדיין רץ על אקסל?"},
+  {"type": "contrast", "items": [...], "say": "במקום אקסל ועשרות וואטסאפים - מערכת אחת שמסדרת הכול."},
+  {"type": "cta", "headline": "בואו נבנה משהו מעולה", "say": "שלחו הודעה, ובואו נבנה משהו מעולה."}
+]
+```
+
+Writing lines that sound right:
+- One idea per line, about 2-3 seconds of speech (6-12 words); the on-screen text and the spoken line should say the same thing in different words, not compete. Leave some scenes silent - a gallery or a wall can run under music alone.
+- Write numbers, phone numbers and English names the way they should be spoken when it matters ("שלושת אלפים שקל", "אפס חמש שמונה..."); add niqqud only to a word that is read wrong.
+- Engines: `"engine": "elevenlabs"` (model `eleven_v4`, then `eleven_v3`; `voice` is a voice id or the start of a voice name from the account's voice list) or `"engine": "gemini"` (default; model `gemini-3.1-flash-tts-preview`, then `gemini-2.5-flash-preview-tts`; `voice` one of 30 prebuilt voices: Puck upbeat (default), Fenrir excitable, Charon informative, Orus / Kore / Alnilam firm, Zephyr / Autonoe bright, Aoede breezy, Sulafat warm, Achird friendly, Algieba / Despina smooth, Gacrux mature). ElevenLabs premade voices that worked from this workspace on the free plan: Brian `nPczCjzI2devNBz1zQrb` (deep), Liam `TX3LPaxmHKxFdv7VOQHJ` (energetic), Jessica `cgSgspJ2msm6clMCkdW9` (bright female) - they are English voices speaking Hebrew; native Hebrew voices from the ElevenLabs library need a paid plan for API use (HTTP 402).
+- Choosing a voice: Claude cannot hear audio, so let the user choose by ear - voice the same line with 3-8 candidates and send one short video with a numbered card per voice; use the chosen voice for the video and remember it as the user's default only if they say so.
+- `style` (Gemini only) is a plain-English direction for the whole take (energy, warmth, pace, accent); `rate` (0.85-1.2) speeds the finished take without changing pitch, for both engines.
+- A continuous script instead of scene lines: `voiceover.text` plus `voiceover.tts` (no `file`) - one take placed at `at`, captions aligned as for a recording.
+
+Free tiers: both engines' free tiers have monthly or daily limits, the takes are cached so re-renders cost nothing, and a free tier's terms can change - when one runs out or refuses (HTTP 401/402/429), say so and offer the other engine. On free tiers the provider may use the text to improve its products, so never put personal or confidential details in a script. Tell the user the narration is an AI-generated voice; never imitate a real person's voice or present the narration as a real person speaking.
 
 ## 5. Brief, preview, render, QA
 
@@ -271,7 +297,7 @@ Send the MP4 and a preview image (8 key frames from the final file, or the cover
 
 ## 7. Limits (say them plainly instead of faking them)
 
-- No text-to-speech or voice cloning in the engine; voiceover only from a recording the user supplies (or a TTS tool the session actually has).
+- Generated narration only through Gemini text-to-speech (prebuilt voices, the user's free API key, section 4b); no voice cloning and no imitation of real people. Without a key or network access to Google, narration needs a recording from the user.
 - No generative video and no stock-footage downloads: visuals are the user's footage/photos/screenshots, motion graphics and the illustrative device UI.
 - No paid tools: budget 0 - no credits, subscriptions or charges. Music and SFX come from free licensed libraries (Soundza); say when a track is AI-generated.
 - The illustrative UI is not a real product: label it, or use real screenshots.
@@ -379,7 +405,7 @@ Top-level fields:
 - `brand`: `name, tagline, initials, logo, phone, website, corner_logo` (small logo top-left on footage scenes and on the animated background), `logo_bg` auto (default: removes the flat square background of an opaque logo) | keep.
 - `brand_kit`: path to a kit from `--brand-from`; its theme and brand fields are defaults the brief can override.
 - `clips`: pool of clips (paths or specs) and/or `clips_dir`: auto-assigned to scenes that have no `clip` key (set `"clip": null` to force the panel).
-- `music`: `file, start, volume (0.8), beat_sync (true)`. `voiceover`: `file, at, volume, text, captions (true), words_per_caption, caption_chars, caption_size, caption_y` - music ducks under it; `text` turns on captions (section 4).
+- `music`: `file, start, volume (0.8), beat_sync (true)`. `voiceover`: `file, at, volume, text, captions (true), words_per_caption, caption_chars, caption_size, caption_y, duck (0.7 = how far the music dips under the voice), tts {engine (gemini) | elevenlabs, voice (Puck for Gemini), style, rate (1.0), model (auto), key_file, per_line}, lead (0.15), tail (0.35)` - music ducks under it; `text` turns on captions (section 4); `tts` generates the voice (section 4b). Scene fields `say` (the scene's spoken line) and `say_at` (seconds after the cut).
 - `sfx`: true | false | {name: path or {file, sync, max, gain}}; `sfx_volume` (0.55).
 - `variants`: [{name, scenes: {"<index in scenes>": {overrides}}}] - extra outputs `<out>_<name>.mp4` sharing the cache.
 - `renderer`: classic (default) | web - which renderer draws the frames (section 2c); `motion_blur` (4), `shutter` (0.5) for the web renderer.
@@ -440,6 +466,9 @@ Command line: `python3 $E [brief.json] [--out FILE] [--format F] [--draft] [--pr
 - A gallery screenshot is cut badly: aim it with `focus` in the item's `src` spec, or use the phone for tall screenshots and the laptop for wide ones.
 - The wall shows its edges or tiles look stretched: set `tile_ratio` to the screenshots' real height/width and add `rows`; the wall is scaled to cover the frame.
 - The typing bar finishes too late: raise `cps` or shorten the `prompt` (the scene grows to fit it).
+- `[error] narration: no ... API key`: setup step 5. `narration: the network blocks <host>`: the user adds the domain to the allowed websites. `HTTP 429` / rate limit: the free quota is used up - wait, switch engine, or render without `say` lines. `HTTP 401/403` with an API-key message: the key is wrong, revoked, or lacks Text to Speech / Voices access. `HTTP 402 ... library voices`: pick a premade voice or the other engine. `turned off free-tier use from this network`: ElevenLabs treated the workspace proxy as a VPN - use Gemini.
+- A narrated line is cut in the wrong place or captions drift: add a full stop at the end of every `say` line; set `"tts": {"per_line": true}` to voice each line separately (more requests).
+- Narration captions cover scene text at the bottom (a `contrast` caption, a gallery tag): move them with `voiceover.caption_y` (0.2 = near the top) or drop the scene's own caption - the narration already says it.
 - `[web] ... rendering with the classic renderer`: the web renderer could not run (Playwright or Chrome missing, or an unsupported scene type) - the line says which; fix it (setup step 4) or accept the premium-style classic render and tell the user.
 - A pop-out lifts the wrong part of a screenshot: set the item's `pop` to {"box": [x0, y0, x1, y1], "radius": r} from the real element (Formula D), or `false`.
 - Hype motion feels too busy or cheap: switch to `"fx": {"style": "premium"}` or the web renderer; or lower the energy and set `"fx": false` on calm scenes.
@@ -457,12 +486,12 @@ Usage:
                           [--preview] [--frame SECONDS] [--draft] [--workers N]
 Needs: python3, numpy, Pillow (with raqm for RTL; else pip install python-bidi), ffmpeg.
 """
-import argparse, glob, hashlib, json, math, os, re, shutil, subprocess, sys, wave
+import argparse, glob, hashlib, json, math, os, re, shutil, subprocess, sys, time, wave
 from concurrent.futures import ProcessPoolExecutor
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, features
 
-VERSION = "4.0.0"
+VERSION = "4.1.0"
 SEED_SALT = "3.0.0"  # frozen: keeps random choices stable across engine versions
 FFMPEG = shutil.which("ffmpeg") or "ffmpeg"
 SR = 48000
@@ -726,6 +755,7 @@ class Ctx:
         self.drift = float(th.get("drift", 0.035 if self.bg_style != "grid" else 0.0))
         self._pstatic = None
         self.captions = []
+        self.caption_words = []
         self.grade = dict(GRADES.get(th.get("grade", "bright"), {}))
         self.top, self.bot = int(mt[0] * H), int(mt[1] * H)
         self.cy = (self.top + self.bot) // 2
@@ -4166,11 +4196,15 @@ def expand(scenes):
                      "dur": it.get("dur", sc.get("per", 1.1)), "small_anim": "down" if j == 0 else "none",
                      **({"beats": it.get("beats", sc["beats_per"])} if sc.get("beats_per") else {}),
                      "transition": sc.get("transition", "whip" if j == 0 else "punch")}
+                if it.get("say") or (j == 0 and sc.get("say")):
+                    s["say"] = it.get("say") or sc["say"]
                 out.append(s)
         elif t == "stats":
             for j, it in enumerate(sc.get("items", [])):
                 s = {"type": "counter", **it}
                 s.setdefault("transition", "slide_up")
+                if j == 0 and sc.get("say") and not it.get("say"):
+                    s["say"] = sc["say"]
                 out.append(s)
         else:
             out.append(dict(sc))
@@ -4271,6 +4305,14 @@ def make_plan(brief, ctx, workdir):
             durs[i] = max(3.0, float(sc.get("quotes_at", 0.9)) + float(sc.get("per_quote", 1.9)) * len(sc.get("quotes", [])) + 0.6)
         if sc["type"] == "bundle" and "dur" not in sc:
             durs[i] = 0.2 + 0.55 * len(sc.get("items", [])) + 2.2
+    segs = (brief.get("_narr") or {}).get("segs") or {}
+    tail = float((brief.get("voiceover") or {}).get("tail", 0.35))
+    mins = [0.0] * len(scenes)
+    for i in range(len(scenes)):
+        sg = segs.get(i)
+        if sg:
+            mins[i] = sg["lead"] + sg["len"] + tail
+            durs[i] = max(durs[i], mins[i])
     mus = brief.get("music") or {}
     beats = np.array([])
     if mus.get("file") and mus.get("beat_sync", True) and os.path.exists(mus["file"]):
@@ -4280,14 +4322,14 @@ def make_plan(brief, ctx, workdir):
         if len(beats) and bpm:
             for i, sc in enumerate(scenes):
                 if sc.get("beats"):
-                    durs[i] = float(sc["beats"]) * 60.0 / bpm
+                    durs[i] = max(float(sc["beats"]) * 60.0 / bpm, mins[i])
     if len(beats):
         t, nd = 0.0, []
         for i, d in enumerate(durs):
             if i == len(durs) - 1:
                 nd.append(d)
                 break
-            c = beats[(beats > t + max(0.6, 0.72 * d)) & (beats < t + 1.45 * d + 0.25)]
+            c = beats[(beats > t + max(0.6, 0.72 * d, mins[i])) & (beats < t + 1.45 * d + 0.25)]
             nt = float(c[np.argmin(np.abs(c - (t + d)))]) if len(c) else t + d
             nd.append(nt - t)
             t = nt
@@ -4313,6 +4355,8 @@ def make_plan(brief, ctx, workdir):
             if i and ctx.energy >= 2 and "transition" not in sc:
                 sc["transition"] = CRAZY_TRANS[(i - 1) % len(CRAZY_TRANS)]
         sc.setdefault("transition", DEFAULT_TRANS.get(sc["type"], "cut") if i else "cut")
+        if segs.get(i):
+            sc["_say"] = {"file": segs[i]["file"], "lead": segs[i]["lead"], "text": segs[i]["text"]}
         for key in ("clip", "before", "after"):
             if sc.get(key):
                 c = norm_clip(sc[key])
@@ -4556,6 +4600,13 @@ def build_audio(brief, scenes, ctx, out_wav):
         v = v[:max(0, N - s)]
         voice[s:s + len(v)] += v
     for sc in scenes:
+        sy = sc.get("_say")
+        if sy and os.path.exists(sy["file"]):
+            v = load_audio(sy["file"], 0, None, loop=False) * float(vo.get("volume", 1.0))
+            s = int((sc["_t0"] + sy["lead"]) * SR)
+            v = v[:max(0, N - s)]
+            voice[s:s + len(v)] += v
+    for sc in scenes:
         if sc.get("audio") and sc.get("clip") and not is_photo(norm_clip(sc["clip"])["src"]):
             c = norm_clip(sc["clip"])
             a = load_audio(c["src"], c.get("start", 0), sc["_dur"], loop=False) * float(sc.get("audio_volume", 1.0))
@@ -4566,7 +4617,7 @@ def build_audio(brief, scenes, ctx, out_wav):
         env = np.abs(voice).mean(1)
         k = int(0.08 * SR)
         env = np.convolve(env, np.ones(k) / k, "same")
-        duck = 1 - 0.7 * np.clip(env / 0.03, 0, 1)
+        duck = 1 - float(vo.get("duck", 0.7)) * np.clip(env / 0.03, 0, 1)
         k2 = int(0.25 * SR)
         duck = np.convolve(duck, np.ones(k2) / k2, "same")
         music *= duck[:, None]
@@ -4711,14 +4762,19 @@ def align_text(text, y, hop=0.01):
         k += len(ph)
     return out
 
-def build_captions(brief):
-    """Captions for a recorded voiceover: voiceover {file, text, at, captions: true}. Returns [{text, s, e}] in video time."""
+def build_captions(brief, with_words=False):
+    """Captions for a recorded voiceover: voiceover {file, text, at, captions: true}. Returns [{text, s, e}] in video time
+    (and, with_words, the word timings of each caption for the web renderer)."""
     vo = brief.get("voiceover") or {}
     if not (vo.get("text") and vo.get("file") and os.path.exists(vo["file"]) and vo.get("captions", True)):
-        return []
+        return ([], []) if with_words else []
     y = load_audio(vo["file"], 0, None, loop=False)
     at = float(vo.get("at", 0))
     words = [(w, a + at, b + at) for w, a, b in align_text(vo["text"], y)]
+    return chunk_captions(words, vo, with_words)
+
+
+def chunk_captions(words, vo, with_words=False):
     maxw, maxc = int(vo.get("words_per_caption", 3)), int(vo.get("caption_chars", 18))
     chunks, cur = [], []
     for w in words:
@@ -4735,7 +4791,378 @@ def build_captions(brief):
     for i, c in enumerate(chunks):
         nxt = chunks[i + 1][0][1] if i + 1 < len(chunks) else 1e9
         out.append({"text": " ".join(w for w, _, _ in c), "s": round(c[0][1] - 0.04, 3), "e": round(min(nxt - 0.04, c[-1][2] + 0.5), 3)})
+    if with_words:
+        return out, [[[w, round(a, 3), round(b, 3)] for w, a, b in c] for c in chunks]
     return out
+
+
+# ----------------------------------------------------------------- v4.1: generated narration (text to speech)
+TTS_AUTO = ["gemini-3.1-flash-tts-preview", "gemini-2.5-flash-preview-tts"]  # free tier of the Gemini API
+TTS_STYLE = ("a native Israeli Hebrew commercial voice-over artist: warm, confident and energetic, "
+             "clear diction, natural modern Hebrew pronunciation, upbeat medium-fast pace")
+TTS_HOST = "generativelanguage.googleapis.com"
+
+
+class TTSError(Exception):
+    pass
+
+
+def tts_conf(brief):
+    """Narration settings, or None when the brief asks for no generated narration."""
+    vo = brief.get("voiceover") or {}
+    lines = [sc.get("say") for sc in expand(brief.get("scenes", [])) if sc.get("say")]
+    t = vo.get("tts")
+    if not lines and not (t and vo.get("text") and not vo.get("file")):
+        return None
+    t = {"voice": t} if isinstance(t, str) else dict(t or {})
+    eng = t.get("engine", "gemini")
+    return {"engine": eng, "model": t.get("model", "auto"), "voice": t.get("voice", "" if eng == "elevenlabs" else "Puck"),
+            "style": t.get("style", TTS_STYLE), "rate": float(t.get("rate", 1.0)), "key_file": t.get("key_file"),
+            "per_line": bool(t.get("per_line", False)), "lines": lines}
+
+
+def tts_key(conf, base_dir="."):
+    """The engine's API key from the environment or a key file. Never printed or written anywhere."""
+    el = conf.get("engine") == "elevenlabs"
+    for k in (("ELEVENLABS_API_KEY", "XI_API_KEY") if el else ("GEMINI_API_KEY", "GOOGLE_API_KEY")):
+        if os.environ.get(k, "").strip():
+            return os.environ[k].strip()
+    for p in (conf.get("key_file"), "~/.config/promo-reel/" + ("elevenlabs_key" if el else "gemini_key")):
+        if p:
+            p = os.path.expanduser(p)
+            p = p if os.path.isabs(p) else os.path.join(base_dir, p)
+            if os.path.exists(p):
+                k = open(p, encoding="utf-8").read().strip()
+                if k:
+                    return k
+    return None
+
+
+def _http_post(url, body, key, timeout=240, key_header="x-goog-api-key", raw=False):
+    import urllib.request
+    import urllib.error
+    host = url.split("/")[2]
+    data = json.dumps(body).encode("utf-8") if body is not None else None
+    req = urllib.request.Request(url, data=data, method="POST" if body is not None else "GET",
+                                 headers={"Content-Type": "application/json", key_header: key})
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                b = r.read()
+                return b if raw else json.loads(b.decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            msg = e.read().decode("utf-8", "replace")
+            if e.headers.get("X-Proxy-Error") or "no rule allows host" in msg or "agent proxy" in msg:
+                raise TTSError(f"the network blocks {host} - add it to the allowed domains "
+                               "(claude.ai: Settings > Capabilities) and try again") from None
+            if e.code == 429 and attempt < 2:
+                m = re.search(r'"retryDelay":\s*"(\d+)', msg)
+                wait = min(65, int(m.group(1)) + 2 if m else 20)
+                log(f"[tts] rate limit - waiting {wait}s")
+                time.sleep(wait)
+                continue
+            if "unusual" in msg.lower():
+                raise TTSError(f"{host} turned off free-tier use from this network (it treats the workspace proxy "
+                               "like a VPN) - use the other engine") from None
+            try:
+                j_ = json.loads(msg)
+                er = j_.get("error") or j_.get("detail") or {}
+                detail = (er.get("message", "") if isinstance(er, dict) else str(er))[:240]
+            except Exception:
+                detail = msg[:240]
+            raise TTSError(f"HTTP {e.code}: {detail}") from None
+        except urllib.error.URLError as e:
+            r_ = str(e.reason)
+            if "403" in r_ or "Tunnel" in r_:
+                raise TTSError(f"the network blocks {host} - add it to the allowed domains "
+                               "(claude.ai: Settings > Capabilities) and try again") from None
+            raise TTSError(f"network error: {r_[:200]}") from None
+    raise TTSError("rate limit - try again in a minute")
+
+
+def _audio_from(data_b64, mime):
+    import base64
+    import io
+    raw = base64.b64decode(data_b64)
+    if raw[:4] == b"RIFF":
+        with wave.open(io.BytesIO(raw)) as w:
+            return np.frombuffer(w.readframes(w.getnframes()), np.int16).copy(), w.getframerate()
+    m = re.search(r"rate=(\d+)", mime or "")
+    return np.frombuffer(raw, np.int16).copy(), int(m.group(1)) if m else 24000
+
+
+def tts_gemini(text, voice, style, model, key):
+    """One Gemini TTS call. Returns (int16 mono samples, sample rate)."""
+    if model.startswith("gemini-3.8"):
+        body = {"model": model, "input": [{"type": "user_input", "content": [{"type": "text", "text": text,
+                "annotations": [{"type": "speech_metadata", "style": style}]}]}],
+                "response_format": {"type": "audio"}, "generation_config": {"speech_config": [{"voice": voice}]}}
+        r = _http_post(f"https://{TTS_HOST}/v1beta/interactions", body, key)
+        for st in reversed(r.get("steps", [])):
+            for c in st.get("content", []):
+                if c.get("type") == "audio" and c.get("data"):
+                    return _audio_from(c["data"], c.get("mime_type"))
+        raise TTSError("no audio in the response")
+    prompt = (f"Read the following Hebrew advertisement script aloud, exactly as written and nothing else. "
+              f"Delivery: {style}.\n\n{text}")
+    body = {"contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"responseModalities": ["AUDIO"],
+                                 "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": voice}}}}}
+    r = _http_post(f"https://{TTS_HOST}/v1beta/models/{model}:generateContent", body, key)
+    for c in r.get("candidates", []):
+        for part in (c.get("content") or {}).get("parts", []):
+            d = part.get("inlineData") or part.get("inline_data")
+            if d and d.get("data"):
+                return _audio_from(d["data"], d.get("mimeType") or d.get("mime_type"))
+    fr = (r.get("candidates") or [{}])[0].get("finishReason")
+    raise TTSError(f"no audio in the response{' (' + fr + ')' if fr else ''}")
+
+
+EL_HOST = "api.elevenlabs.io"
+
+
+def tts_elevenlabs(text, voice, model, key, lang="he"):
+    """One ElevenLabs call (voice = voice id or name). Returns (int16 mono samples, sample rate)."""
+    vid = voice
+    if not re.fullmatch(r"[A-Za-z0-9]{20}", voice or ""):
+        r = _http_post(f"https://{EL_HOST}/v1/voices", None, key, key_header="xi-api-key")
+        vs = r.get("voices", [])
+        hit = [v for v in vs if v.get("name", "").lower().startswith((voice or "").lower())] if voice else vs
+        if not hit:
+            raise TTSError(f"no ElevenLabs voice named '{voice}' (have: {', '.join(v.get('name', '') for v in vs[:12])})")
+        vid = hit[0]["voice_id"]
+    body = {"text": text, "model_id": model, "language_code": lang}
+    mp3 = _http_post(f"https://{EL_HOST}/v1/text-to-speech/{vid}?output_format=mp3_44100_128", body, key,
+                     key_header="xi-api-key", raw=True)
+    dec = subprocess.run([FFMPEG, "-v", "error", "-i", "-", "-f", "s16le", "-ac", "1", "-ar", "44100", "-"],
+                         input=mp3, capture_output=True).stdout
+    if not dec:
+        raise TTSError("ElevenLabs returned no audio")
+    return np.frombuffer(dec, np.int16).copy(), 44100
+
+
+def tts_synthetic(text):
+    """Offline stand-in voice for tests: speech-like syllables, about 13 characters per second."""
+    rate = 24000
+    rng = np.random.default_rng(len(text))
+    out = []
+    for ph in re.split(r"(?<=[.,!?;:])\s+|\n+", text.strip()):
+        n = max(1, len(ph.replace(" ", "")) // 2)
+        for _ in range(n):
+            d = 0.12 + 0.05 * rng.random()
+            t = np.arange(int(rate * d)) / rate
+            f0 = 140 + 40 * rng.random()
+            out.append(0.35 * np.sin(2 * np.pi * f0 * t) * np.sin(np.pi * t / d) ** 2 * (1 + 0.3 * np.sin(2 * np.pi * 3 * f0 * t)))
+            out.append(np.zeros(int(rate * 0.03)))
+        out.append(np.zeros(int(rate * 0.45)))
+    y = np.concatenate(out)
+    return (y / max(1e-6, np.abs(y).max()) * 0.7 * 32767).astype(np.int16), rate
+
+
+def tts_say(text, conf, key):
+    """Synthesize text with the configured engine; returns (int16 samples, rate, model used)."""
+    if conf["engine"] == "synthetic":
+        return (*tts_synthetic(text), "synthetic")
+    if conf["engine"] == "elevenlabs":
+        models = ["eleven_v4", "eleven_v3"] if conf["model"] == "auto" else [conf["model"]]
+        err = None
+        for m in models:
+            try:
+                y, rate = tts_elevenlabs(text, conf["voice"], m, key)
+                return y, rate, m
+            except TTSError as e:
+                err = e
+                if "HTTP 400" in str(e) or "HTTP 404" in str(e) or "HTTP 422" in str(e):
+                    continue
+                raise
+        raise err
+    if conf["engine"] != "gemini":
+        raise TTSError(f"unknown tts engine '{conf['engine']}' (use gemini or elevenlabs)")
+    models = TTS_AUTO if conf["model"] == "auto" else [conf["model"]]
+    err = None
+    for m in models:
+        try:
+            y, rate = tts_gemini(text, conf["voice"], conf["style"], m, key)
+            return y, rate, m
+        except TTSError as e:
+            err = e
+            if "HTTP 404" in str(e) or "HTTP 400" in str(e) and "model" in str(e).lower():
+                continue
+            raise
+    raise err
+
+
+def _save_wav(path, y, rate):
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with wave.open(path, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(np.asarray(y, np.int16).tobytes())
+
+
+def _trim(y, rate, pad=0.05):
+    """Cut leading/trailing silence and level the voice (peak about -3 dBFS)."""
+    f = y.astype(np.float32) / 32768.0
+    h = max(1, int(rate * 0.01))
+    n = len(f) // h
+    if n == 0:
+        return y
+    rms = np.sqrt((f[:n * h].reshape(n, h) ** 2).mean(1) + 1e-12)
+    on = np.nonzero(rms > max(rms.max() * 0.05, 0.004))[0]
+    if len(on):
+        a, b = max(0, on[0] * h - int(pad * rate)), min(len(f), (on[-1] + 1) * h + int(pad * rate))
+        f = f[a:b]
+    f = f / max(1e-6, np.abs(f).max()) * 0.7
+    return (f * 32767).astype(np.int16)
+
+
+def _split_lines(y, rate, lines):
+    """Cut one narration take into len(lines) pieces at its longest pauses. None when the pauses do not fit."""
+    n = len(lines)
+    if n == 1:
+        return [(0, len(y))]
+    f = y.astype(np.float32) / 32768.0
+    hop = 0.01
+    h = int(rate * hop)
+    m = len(f) // h
+    rms = np.sqrt((f[:m * h].reshape(m, h) ** 2).mean(1) + 1e-12)
+    v = rms > max(np.percentile(rms, 95) * 0.08, 0.003)
+    gaps = [(a, b) for a, b in _runs(~v) if a > 0 and b < m and b - a >= 15]
+    if len(gaps) < n - 1:
+        return None
+    # expected cut points from the text lengths: pick, in order, the longest pause near each one
+    tot = sum(len(x) for x in lines)
+    voiced_total = int(v.sum()) or 1
+    cum = np.cumsum(v)
+    cuts, used = [], set()
+    acc = 0
+    for k in range(n - 1):
+        acc += len(lines[k])
+        target = acc / tot * voiced_total
+        best, score = None, -1e9
+        for j, (a, b) in enumerate(gaps):
+            if j in used or (cuts and a <= cuts[-1][1]):
+                continue
+            dist = abs(cum[a] - target) / voiced_total
+            sc_ = (b - a) / 100.0 - 4.0 * dist
+            if sc_ > score:
+                best, score = j, sc_
+        if best is None:
+            return None
+        used.add(best)
+        cuts.append(gaps[best])
+    bounds = [0] + [int((a + b) / 2 * h) for a, b in cuts] + [len(y)]
+    pieces = [(bounds[i], bounds[i + 1]) for i in range(n)]
+    # sanity: each piece within 0.4x-2.5x of its share of the text
+    total = len(y)
+    for (a, b), ln in zip(pieces, lines):
+        share = len(ln) / tot
+        if not 0.4 * share <= (b - a) / total <= 2.5 * share:
+            return None
+    return pieces
+
+
+def _atempo(path, rate_mul):
+    if abs(rate_mul - 1) < 0.01:
+        return
+    tmp = path + ".tmp.wav"
+    subprocess.run([FFMPEG, "-v", "error", "-y", "-i", path, "-filter:a", f"atempo={rate_mul:.3f}", tmp], check=True)
+    os.replace(tmp, path)
+
+
+def prepare_narration(brief, base_dir="."):
+    """Generate the narration (cached by script, voice and style) and record it in the brief:
+    scene lines -> brief['_narr']['segs'] {expanded scene index: {file, len, lead, text}};
+    one continuous script (voiceover.text + voiceover.tts) -> voiceover.file."""
+    conf = tts_conf(brief)
+    if not conf:
+        return None
+    vo = brief.setdefault("voiceover", {})
+    scenes = expand(brief.get("scenes", []))
+    per_scene = bool(conf["lines"])
+    lines = conf["lines"] if per_scene else [vo["text"]]
+    h = hashlib.md5(json.dumps([conf["engine"], conf["model"], conf["voice"], conf["style"], conf["rate"], lines,
+                                conf["per_line"]], ensure_ascii=False).encode()).hexdigest()[:14]
+    cdir = os.path.join(os.path.expanduser("~/.cache/promo-reel/tts"), h)
+    meta_p = os.path.join(cdir, "meta.json")
+    if os.path.exists(meta_p):
+        meta = json.load(open(meta_p, encoding="utf-8"))
+        log(f"[tts] cached narration ({meta['model']}, voice {conf['voice']})")
+    else:
+        key = tts_key(conf, base_dir) if conf["engine"] in ("gemini", "elevenlabs") else None
+        if conf["engine"] == "gemini" and not key:
+            raise TTSError("no Gemini API key: set GEMINI_API_KEY or save the key in ~/.config/promo-reel/gemini_key "
+                           "(free at aistudio.google.com, no credit card)")
+        if conf["engine"] == "elevenlabs" and not key:
+            raise TTSError("no ElevenLabs API key: set ELEVENLABS_API_KEY or save the key in "
+                           "~/.config/promo-reel/elevenlabs_key (elevenlabs.io > Developers > API keys)")
+        files, model = [], None
+        pieces = None
+        if len(lines) > 1 and not conf["per_line"]:
+            log(f"[tts] generating {len(lines)} lines in one take (voice {conf['voice']})")
+            y, rate, model = tts_say("\n\n".join(lines), conf, key)
+            pieces = _split_lines(y, rate, lines)
+            if pieces is None:
+                log("[tts] the pauses in the take did not match the lines - generating each line separately")
+        if pieces is not None:
+            for k, (a, b) in enumerate(pieces):
+                p = os.path.join(cdir, f"line{k:02d}.wav")
+                _save_wav(p, _trim(y[a:b], rate), rate)
+                files.append(p)
+        else:
+            for k, ln in enumerate(lines):
+                if len(lines) > 1:
+                    log(f"[tts] line {k + 1}/{len(lines)}")
+                y, rate, model = tts_say(ln, conf, key)
+                p = os.path.join(cdir, f"line{k:02d}.wav")
+                _save_wav(p, _trim(y, rate), rate)
+                files.append(p)
+        for p in files:
+            _atempo(p, conf["rate"])
+        meta = {"model": model, "files": files, "lens": [], "lines": lines}
+        for p in files:
+            with wave.open(p) as w:
+                meta["lens"].append(round(w.getnframes() / w.getframerate(), 3))
+        json.dump(meta, open(meta_p, "w", encoding="utf-8"), ensure_ascii=False)
+        log(f"[tts] narration ready: {sum(meta['lens']):.1f}s ({model}) - AI-generated voice")
+    if not per_scene:
+        vo["file"] = meta["files"][0]
+        vo.setdefault("at", 0.3)
+        return meta
+    segs, k = {}, 0
+    lead0 = float(vo.get("lead", 0.15))
+    for i, sc in enumerate(scenes):
+        if sc.get("say"):
+            segs[i] = {"file": meta["files"][k], "len": meta["lens"][k], "text": sc["say"],
+                       "lead": float(sc.get("say_at", max(lead0, 0.3) if i == 0 else lead0))}
+            k += 1
+    brief["_narr"] = {"segs": segs}
+    return meta
+
+
+def scene_captions(scenes, vo):
+    """Captions for scene lines, placed at each scene's line."""
+    words = []
+    for sc in scenes:
+        sy = sc.get("_say")
+        if sy and os.path.exists(sy["file"]):
+            y = load_audio(sy["file"], 0, None, loop=False)
+            off = sc["_t0"] + sy["lead"]
+            words += [(w, a + off, b + off) for w, a, b in align_text(sy["text"], y)]
+    return chunk_captions(words, vo, True) if words else ([], [])
+
+
+def plan_with_narration(brief, ctx, workdir, base_dir="."):
+    """make_plan plus narration: generated lines lengthen their scenes, and captions follow the plan."""
+    prepare_narration(brief, base_dir)
+    vo = brief.get("voiceover") or {}
+    ctx.captions, ctx.caption_words = build_captions(brief, True)
+    scenes = make_plan(brief, ctx, workdir)
+    if (brief.get("_narr") or {}).get("segs") and vo.get("captions", True):
+        ctx.captions, ctx.caption_words = scene_captions(scenes, vo)
+        scenes = make_plan(brief, ctx, workdir)  # scene keys include the captions they show
+    return scenes
 
 
 def caption_cy(ctx, h):
@@ -5255,7 +5682,11 @@ def selftest(workers=2):
     web_types = ("kinetic", "contrast", "gallery", "wall", "bundle", "logo", "cta")
     bw = dict(brief, out="selftest_web.mp4", renderer="web", music_free_version=False,
               scenes=[dict(sc_) for sc_ in brief["scenes"] if sc_["type"] in web_types])
-    bw.pop("voiceover", None)
+    # with generated narration (offline stand-in voice): scene lines, longer scenes, captions, ducking
+    bw["voiceover"] = {"tts": {"engine": "synthetic"}, "caption_size": 56}
+    bw["scenes"][0]["say"] = "בדיקת קריינות ראשונה."
+    bw["scenes"][1]["say"] = "שורה שנייה, קצת יותר ארוכה מהראשונה."
+    bw["scenes"][-1]["say"] = "וזה הסיום."
     bw["scenes"][3]["items"][0]["pop"] = {"box": [0.2, 0.2, 0.8, 0.6], "scale": 1.3}
     bpw = os.path.join(d, "brief_web.json")
     json.dump(bw, open(bpw, "w"), ensure_ascii=False)
@@ -5274,6 +5705,20 @@ def selftest(workers=2):
             os.chdir(cwd)
         qw = os.path.join(d, "selftest_web_qa.json")
         rw = json.load(open(qw)) if os.path.exists(qw) else {"errors": ["web render missing"]}
+        os.chdir(d)
+        try:
+            bn = load_brief(bpw)
+            cn = Ctx(bn, "9x16", True)
+            sn = plan_with_narration(bn, cn, os.path.join(d, "selftest_web_work"), d)
+            said = [x for x in sn if x.get("_say")]
+            short = [x["type"] for x in said if x["_dur"] < x["_say"]["lead"] + json.load(open(os.path.join(
+                os.path.dirname(x["_say"]["file"]), "meta.json")))["lens"][[y["_say"]["file"] for y in said].index(x["_say"]["file"])]]
+            print(f"narration: {len(said)} lines, {len(cn.captions)} captions")
+            if len(said) != 3 or not cn.captions or short:
+                rw.setdefault("errors", []).append(f"narration: {len(said)} lines placed, {len(cn.captions)} captions, "
+                                                   f"too short: {short}")
+        finally:
+            os.chdir(cwd)
         rep.setdefault("errors", []).extend("web pass: " + e for e in rw.get("errors", []))
         print("web pass:", "ok" if os.path.exists(os.path.join(d, "selftest_web.mp4")) and not rw.get("errors") else "FAILED")
     os.chdir(d)
@@ -5313,11 +5758,14 @@ def run(brief_path, out, fmt, draft, workers, preview, frame_at, workdir=None, c
     ctx = Ctx(brief, fmt, draft)
     for r in ctx.ts.values():
         font_path(r[0])
-    ctx.captions = build_captions(brief)
     stem = os.path.splitext(out)[0]
     workdir = workdir or stem + "_work"
     os.makedirs(workdir, exist_ok=True)
-    scenes = make_plan(brief, ctx, workdir)
+    try:
+        scenes = plan_with_narration(brief, ctx, workdir, base_dir)
+    except TTSError as e:
+        log(f"[error] narration: {e}")
+        raise SystemExit(2)
     total = sum(s["_dur"] for s in scenes)
     log(f"[plan] {len(scenes)} scenes, {total:.1f}s, {ctx.W}x{ctx.H}@{ctx.fps}")
     for i, s in enumerate(scenes):
@@ -5426,9 +5874,8 @@ def qa_only(brief_path, video, fmt, draft, creative):
     os.chdir(os.path.dirname(os.path.abspath(brief_path)))
     validate(brief)
     ctx = Ctx(brief, fmt, draft)
-    ctx.captions = build_captions(brief)
     stem = os.path.splitext(video)[0]
-    scenes = make_plan(brief, ctx, stem + "_work" if os.path.isdir(stem + "_work") else os.path.dirname(os.path.abspath(video)))
+    scenes = plan_with_narration(brief, ctx, stem + "_work" if os.path.isdir(stem + "_work") else os.path.dirname(os.path.abspath(video)))
     rep = qa(video, brief, scenes, ctx, creative, stem)
     print(stem + "_qa.md")
     print(json.dumps({k: rep[k] for k in ("auto_points", "score", "creative", "errors", "warnings") if k in rep}, ensure_ascii=False, indent=1))
@@ -5546,7 +5993,7 @@ from PIL import Image
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import promo_engine as pe  # noqa: E402
 
-WEB_VERSION = "4.0.0"
+WEB_VERSION = "4.1.0"
 WEB_TYPES = {"kinetic", "contrast", "gallery", "wall", "bundle", "cta", "logo", "counter", "stat", "stats", "title"}
 TRANS_MAP = {"cut": "cut", "flash": "flash", "punch": "zoom_through", "fade": "fade", "zoom": "zoom_through",
              "whip": "push", "slide": "push", "slide_up": "push_up", "glitch": "zoom_through", "blur": "blur",
@@ -5749,6 +6196,21 @@ window.seek = function (t) {
   }
   const cl = $('cornerlogo');
   if (cl) cl.style.opacity = cur.corner ? clamp(lt / 0.5) * 0.92 : 0;
+  const C = window.__caps || [];
+  for (let k = 0; k < C.length; k++) {
+    const c = C[k], el = $('cap' + k);
+    const on = t >= c.s && t < c.e;
+    el.style.display = on ? 'inline-block' : 'none';
+    if (!on) continue;
+    const p = clamp((t - c.s) / 0.14), q = clamp((c.e - t) / 0.1);
+    el.style.opacity = Math.min(p, q);
+    el.style.transform = `translateY(${(1 - expoOut(p)) * 18 * U}px) scale(${lerp(0.94, 1, expoOut(p))})`;
+    el.querySelectorAll('.cw').forEach((w, j) => {
+      const [, a, b] = c.w[j] || [0, c.s, c.e];
+      w.classList.toggle('on', t >= a - 0.02);
+      w.classList.toggle('now', t >= a - 0.02 && t < b + 0.05);
+    });
+  }
   return i;
 };
 
@@ -5797,6 +6259,15 @@ html, body { margin: 0; width: __W__px; height: __H__px; overflow: hidden; backg
   z-index: 30; opacity: 0; }
 .grad .w, .grad:not(:has(.w)) { background: linear-gradient(180deg, var(--hi) 0%, var(--primary) 45%, var(--primary2) 100%);
   -webkit-background-clip: text; background-clip: text; color: transparent; }
+#caps { position: absolute; left: 5%; right: 5%; z-index: 36; display: flex; justify-content: center; pointer-events: none;
+  transform: translateY(-50%); }
+.capbox { display: none; padding: .26em .62em .32em; border-radius: .42em; background: rgba(10,12,22,.9);
+  box-shadow: 0 calc(18px*var(--u)) calc(44px*var(--u)) rgba(0,0,0,.45), inset 0 0 0 1px rgba(255,255,255,.12);
+  font-family: 'R-heavy'; font-weight: 800; line-height: 1.12; color: #fff; text-align: center; direction: rtl;
+  text-wrap: balance; max-width: 100%; will-change: transform, opacity; }
+.capbox .cw { display: inline-block; opacity: .5; }
+.capbox .cw.on { opacity: 1; }
+.capbox .cw.now { color: var(--primary); }
 .sheen { position: absolute; top: -20%; bottom: -20%; width: 34%; left: 33%; opacity: 0; pointer-events: none;
   background: linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,.38), rgba(255,255,255,0)); }
 """
@@ -6462,17 +6933,29 @@ def build_page(scenes, brief, ctx, wd):
         layers.append(f'<div class="scene" id="S{i}">{r["html"]}</div>')
         defs.append(f"{{t0: {sc['_t0']:.4f}, d: {sc['_dur']:.4f}, tr: '{kind}', td: {td:.3f}, el: $('S{i}'), corner: "
                     f"{'true' if r.get('corner', True) else 'false'}, fn: {r['js']}}}")
+    caps_html, caps_js = "", "[]"
+    if ctx.captions:
+        vo = brief.get("voiceover") or {}
+        size = float(vo.get("caption_size", 64)) * P_.U
+        cy = float(vo["caption_y"]) * P_.H if vo.get("caption_y") else P_.bot - size * 1.45 * 0.6
+        words = getattr(ctx, "caption_words", None) or [[[w, c["s"], c["e"]] for w in c["text"].split()] for c in ctx.captions]
+        boxes = []
+        for k, (c, ws) in enumerate(zip(ctx.captions, words)):
+            boxes.append(f'<div class="capbox" id="cap{k}">' + " ".join(f'<span class="cw">{esc(w[0])}</span>' for w in ws) + "</div>")
+        caps_html = f'<div id="caps" style="top:{cy:.0f}px;font-size:{size:.1f}px">{"".join(boxes)}</div>'
+        caps_js = json.dumps([{"s": c["s"], "e": c["e"], "w": ws} for c, ws in zip(ctx.captions, words)], ensure_ascii=False)
     corner = ""
     if ctx.brand.get("corner_logo"):
         url, _ = _logo_url(P_)
         corner = f'<img id="cornerlogo" src="{url}">'
     page = f"""<!doctype html><html dir="rtl" lang="he"><head><meta charset="utf-8"><style>{css}</style></head><body>
-<div id="stage">{bg_html}<div id="scenes">{"".join(layers)}</div>{corner}<div id="ring"></div><div class="vig"></div><div class="grain"></div>
+<div id="stage">{bg_html}<div id="scenes">{"".join(layers)}</div>{corner}{caps_html}<div id="ring"></div><div class="vig"></div><div class="grain"></div>
 <div id="flash"></div></div>
 <script>window.__U = {P_.U:.5f}; window.__W = {P_.W}; window.__H = {P_.H};
 {RUNTIME}
 {bg_js}
 window.__scenes = [{",".join(defs)}];
+window.__caps = {caps_js};
 window.seek(0);
 </script></body></html>"""
     path = os.path.join(wd, "web", "index.html")
@@ -6611,10 +7094,9 @@ def run_web(brief_path, out, fmt, draft, workers, preview, frame_at, workdir=Non
     base_dir = os.path.dirname(os.path.abspath(brief_path))
     os.chdir(base_dir)
     bad = unsupported(brief)
-    if bad or brief.get("voiceover", {}).get("captions"):
-        why = f"scene types {', '.join(bad)}" if bad else "voiceover captions"
+    if bad:
         return classic(brief_path, out, fmt, draft, workers, preview, frame_at, workdir, creative, do_qa, plan,
-                       f"the web renderer does not support {why} yet")
+                       f"the web renderer does not support scene types {', '.join(bad)} yet")
     if plan:
         return pe.run(brief_path, out, fmt, draft, workers, preview, frame_at, workdir, creative=creative, do_qa=do_qa, plan=True)
     prob = browser_problem()
@@ -6632,7 +7114,11 @@ def run_web(brief_path, out, fmt, draft, workers, preview, frame_at, workdir=Non
     stem = os.path.splitext(out)[0]
     workdir = workdir or stem + "_work"
     os.makedirs(workdir, exist_ok=True)
-    scenes = pe.make_plan(brief, ctx, workdir)
+    try:
+        scenes = pe.plan_with_narration(brief, ctx, workdir, base_dir)
+    except pe.TTSError as e:
+        pe.log(f"[error] narration: {e}")
+        raise SystemExit(2)
     total = sum(s["_dur"] for s in scenes)
     pe.log(f"[plan] {len(scenes)} scenes, {total:.1f}s, {ctx.W}x{ctx.H}@{ctx.fps} (web renderer {WEB_VERSION})")
     for i, s in enumerate(scenes):
