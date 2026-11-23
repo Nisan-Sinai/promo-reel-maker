@@ -10,7 +10,7 @@ from concurrent.futures import ProcessPoolExecutor
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, features
 
-VERSION = "4.1.0"
+VERSION = "4.1.1"
 SEED_SALT = "3.0.0"  # frozen: keeps random choices stable across engine versions
 FFMPEG = shutil.which("ffmpeg") or "ffmpeg"
 SR = 48000
@@ -3453,7 +3453,7 @@ def affine_frame(fr, s=1.0, rot=0.0, dx=0.0, dy=0.0):
     c, sn = math.cos(-a) / s, math.sin(-a) / s
     cx, cy = W / 2, H / 2
     A = (c, -sn, cx - c * (cx + dx) + sn * (cy + dy), sn, c, cy - sn * (cx + dx) - c * (cy + dy))
-    return np.asarray(Image.fromarray(fr).transform((W, H), Image.AFFINE, A, Image.BILINEAR))
+    return np.array(Image.fromarray(fr).transform((W, H), Image.AFFINE, A, Image.BILINEAR))
 
 
 _DIST = {}
@@ -3982,6 +3982,8 @@ def frames(sc, ctx, k0=0, count=None, prev=None):
             elif ctx.premium and sc["_t0"] > 0 and t < 0.9 and sc.get("fx", True) is not False:
                 out = affine_frame(out, 1 + 0.03 * (1 - e_cubic(t / 0.9)))
             if ctx.captions:
+                if not out.flags.writeable:
+                    out = out.copy()
                 draw_captions(out, sc["_t0"] + t, ctx)
             out = transition(sc["transition"], out, prev, k, ctx.U, rng, ctx)
             yield out
@@ -5186,7 +5188,11 @@ def selftest(workers=2):
     rep = json.load(open(os.path.join(d, "selftest_qa.json"))) if os.path.exists(os.path.join(d, "selftest_qa.json")) else {}
     # second pass: the same scenes with fx energy 3 (beat punches, shake, crazy transitions, gallery pop-outs)
     bfx = dict(brief, out="selftest_fx.mp4", fx={"energy": 3}, music_free_version=False)
-    bfx.pop("voiceover", None)
+    # with generated narration captions too (stand-in voice): captions are drawn on frames the camera moved
+    bfx["scenes"] = json.loads(json.dumps(brief["scenes"]))
+    bfx["voiceover"] = {"tts": {"engine": "synthetic"}, "caption_size": 56}
+    bfx["scenes"][0]["say"] = "בדיקת כתוביות עם תנועת מצלמה."
+    bfx["scenes"][1]["say"] = "שורה שנייה בזמן מעבר."
     bpx = os.path.join(d, "brief_fx.json")
     json.dump(bfx, open(bpx, "w"), ensure_ascii=False)
     try:

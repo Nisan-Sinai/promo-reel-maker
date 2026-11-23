@@ -41,7 +41,7 @@ python3 -m py_compile ~/.cache/promo-reel/promo_engine.py ~/.cache/promo-reel/pr
 3. Fonts (Rubik, Heebo, Secular One, Frank Ruhl, Assistant, Rubik Dirt, Suez One, Karantina, Fredoka, Varela Round, Noto Sans Hebrew, Geist, Geist Mono) download automatically from Google Fonts on GitHub into ~/.cache/promo_fonts; if blocked, the engine falls back to local Hebrew fonts.
 4. Web renderer (needed only for `"renderer": "web"`): `python3 -c "import playwright" 2>/dev/null || pip install playwright --break-system-packages`, then `python3 ~/.cache/promo-reel/promo_web.py --check`. It uses a system Chrome (`/usr/bin/google-chrome`, Chromium, or the path in the `CHROME` environment variable). If it reports that no browser could start, try `python3 -m playwright install chromium` once; if the download is blocked, carry on - briefs with `"renderer": "web"` then render with the classic renderer in the premium style, and tell the user the video used the fallback.
 5. Narration (needed only for generated narration, section 4b): an API key for the engine the brief uses. ElevenLabs: elevenlabs.io > Developers > API keys (a free account; a restricted key with Text to Speech access and Voices read is enough), read from `ELEVENLABS_API_KEY` or `~/.config/promo-reel/elevenlabs_key`. Gemini: aistudio.google.com > Get API key (free, no credit card), read from `GEMINI_API_KEY` or `~/.config/promo-reel/gemini_key`. When the user gives a key in the conversation, or asks Claude to create one in their signed-in browser, write it to that file (`mkdir -p ~/.config/promo-reel && chmod 700 ~/.config/promo-reel`, then the file with mode 600) and never put it in a brief, a log, a commit, memory or a reply. The workspace must be allowed to reach `api.elevenlabs.io` / `generativelanguage.googleapis.com`; if the engine reports that the network blocks it, ask the user to add the domain under claude.ai/settings/capabilities > Create and edit files > Allowed websites > Manage - Claude does not change network settings itself.
-6. Optional (about 1-2 minutes): `python3 $E --selftest` renders every scene type from synthetic media at draft size three times - as is, with `fx` energy 3 (every transition, camera hits, pop-outs), and with the web renderer (skipped, with the reason, when Chrome is not available) - and runs QA on each. The web pass also voices three scene lines with an offline stand-in voice (no key needed) to check narration timing and captions. It must print `fx pass: ok`, `web pass: ok` (or `skipped`) and `SELFTEST PASS` (the short test CTA is expected to miss the 4 s rule). Run it after any change to the engine.
+6. Optional (about 1-2 minutes): `python3 $E --selftest` renders every scene type from synthetic media at draft size three times - as is, with `fx` energy 3 (every transition, camera hits, pop-outs), and with the web renderer (skipped, with the reason, when Chrome is not available) - and runs QA on each. The fx pass and the web pass also voice scene lines with an offline stand-in voice (no key needed) to check narration timing and captions, including captions on frames the camera moves. It must print `fx pass: ok`, `web pass: ok` (or `skipped`) and `SELFTEST PASS` (the short test CTA is expected to miss the 4 s rule). Run it after any change to the engine.
 
 Below, `E=~/.cache/promo-reel/promo_engine.py`.
 
@@ -491,7 +491,7 @@ from concurrent.futures import ProcessPoolExecutor
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, features
 
-VERSION = "4.1.0"
+VERSION = "4.1.1"
 SEED_SALT = "3.0.0"  # frozen: keeps random choices stable across engine versions
 FFMPEG = shutil.which("ffmpeg") or "ffmpeg"
 SR = 48000
@@ -3934,7 +3934,7 @@ def affine_frame(fr, s=1.0, rot=0.0, dx=0.0, dy=0.0):
     c, sn = math.cos(-a) / s, math.sin(-a) / s
     cx, cy = W / 2, H / 2
     A = (c, -sn, cx - c * (cx + dx) + sn * (cy + dy), sn, c, cy - sn * (cx + dx) - c * (cy + dy))
-    return np.asarray(Image.fromarray(fr).transform((W, H), Image.AFFINE, A, Image.BILINEAR))
+    return np.array(Image.fromarray(fr).transform((W, H), Image.AFFINE, A, Image.BILINEAR))
 
 
 _DIST = {}
@@ -4463,6 +4463,8 @@ def frames(sc, ctx, k0=0, count=None, prev=None):
             elif ctx.premium and sc["_t0"] > 0 and t < 0.9 and sc.get("fx", True) is not False:
                 out = affine_frame(out, 1 + 0.03 * (1 - e_cubic(t / 0.9)))
             if ctx.captions:
+                if not out.flags.writeable:
+                    out = out.copy()
                 draw_captions(out, sc["_t0"] + t, ctx)
             out = transition(sc["transition"], out, prev, k, ctx.U, rng, ctx)
             yield out
@@ -5667,7 +5669,11 @@ def selftest(workers=2):
     rep = json.load(open(os.path.join(d, "selftest_qa.json"))) if os.path.exists(os.path.join(d, "selftest_qa.json")) else {}
     # second pass: the same scenes with fx energy 3 (beat punches, shake, crazy transitions, gallery pop-outs)
     bfx = dict(brief, out="selftest_fx.mp4", fx={"energy": 3}, music_free_version=False)
-    bfx.pop("voiceover", None)
+    # with generated narration captions too (stand-in voice): captions are drawn on frames the camera moved
+    bfx["scenes"] = json.loads(json.dumps(brief["scenes"]))
+    bfx["voiceover"] = {"tts": {"engine": "synthetic"}, "caption_size": 56}
+    bfx["scenes"][0]["say"] = "בדיקת כתוביות עם תנועת מצלמה."
+    bfx["scenes"][1]["say"] = "שורה שנייה בזמן מעבר."
     bpx = os.path.join(d, "brief_fx.json")
     json.dump(bfx, open(bpx, "w"), ensure_ascii=False)
     try:
