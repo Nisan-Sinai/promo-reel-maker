@@ -1,11 +1,11 @@
 ---
 name: "promo-reel-maker"
-description: "Make branded, beat-synced promo videos (Reels/TikTok/Shorts/Status ads, YouTube promos) for a business from its clips, photos or website/brand repo: kinetic typography, motion graphics, device mockups, portfolio galleries, proof walls and 3D pop-outs, an optional Chrome renderer for cinematic motion, automatic QA report. Hebrew/RTL first; 9:16 plus 1:1, 4:5, 16:9, up to 4K. Use for סרטון פרסומי, רילס לעסק, סרטון מיתוג, or 'make a video like this'."
+description: "Make branded, beat-synced promo videos (Reels/TikTok/Shorts/Status ads, YouTube promos) for a business from its clips, photos or website/brand repo: kinetic typography, motion graphics, device mockups, playing screen recordings, layered 3D product reveals, breakout, orbit, exploded views and tunnel shots, selectable art direction, automatic QA report. Hebrew/RTL first; 9:16 plus 1:1, 4:5, 16:9, up to 4K. Use for סרטון פרסומי, רילס לעסק, סרטון מיתוג, or 'make a video like this'."
 ---
 
 # Promo Reel Maker
 
-Turns a business's raw clips/photos plus a few facts into a polished 20-40 s ad: kinetic gradient typography, a hook with footage playing *inside* the letters, red "problem" stamps that slam in, a logo reveal with a light sweep, service cards, a photo collage, counting stats, an animated checklist with the clip in a card, testimonial card with stars, before/after wipe, offer badge, and a CTA with a chat button, phone number and a tap animation. Cuts snap to the music's beat; whooshes/impacts/pops are placed automatically; audio is loudness-normalized; a cover image is exported. Everything is driven by one JSON brief and rendered by the bundled engine (Python + Pillow + numpy + ffmpeg), or - for the motion-graphics scenes - by an optional browser renderer that draws every frame in Chrome. Unchanged scenes are cached, so edits and A/B hook variants re-render only what changed.
+Turns a business's raw clips/photos plus a few facts into a polished 20-40 s ad: kinetic gradient typography, a hook with footage playing *inside* the letters, red "problem" stamps that slam in, a logo reveal with a light sweep, service cards, a photo collage, counting stats, an animated checklist with the clip in a card, testimonial card with stars, before/after wipe, offer badge, and a CTA with a chat button, phone number and a tap animation. Cuts snap to the music's beat; whooshes/impacts/pops are placed automatically; audio is loudness-normalized; a cover image is exported. Everything is driven by one JSON brief and rendered by the bundled engine (Python + Pillow + numpy + ffmpeg), or - for the motion-graphics scenes - by an optional browser renderer that draws every frame in Chrome. The classic renderer caches unchanged scenes. The web renderer redraws each frame.
 
 Version 2 adds what the strongest short-form ads do: photos get real camera moves (wide shots pan across instead of being cropped), footage stays bright with soft scrims and boxed caption-style text instead of a dimmed frame, a `showcase` scene for one-feature-per-shot tours, `features` (icon rows on glass), `location` (map-pin drop), a boxed hook, slide / light-leak / blur transitions, colour grades, Reels safe zones and scene lengths set in beats.
 
@@ -18,6 +18,8 @@ Version 3.2 adds motion styles (`fx`). `premium`: smooth, cinematic motion - ele
 Version 4 adds a second renderer, `"renderer": "web"`. The same engine plans the video, snaps it to the beat, mixes the sound, makes the cover and runs QA, but every frame of the motion-graphics scenes (kinetic, title, contrast, gallery, wall, bundle, counter/stat, logo, cta) is drawn by Chrome: real CSS 3D (phones and laptops that turn, cards that lift off the screen), sub-pixel motion with motion blur, sharp type and soft shadows. It is clearly more polished than the classic renderer and is the recommended choice for Formula D. It needs Playwright and a Chrome or Chromium browser in the workspace; when they are missing, or a brief uses a scene type it does not draw yet, the video renders with the classic renderer in the premium style automatically. The classic renderer and every older brief are unchanged.
 
 Version 4.1 adds generated narration: write a line for a scene (`"say"`) and the engine voices the whole script with ElevenLabs or Google's Gemini text-to-speech (both have free tiers), places each line on its scene, makes the scene long enough for it, ducks the music under the voice and shows word-by-word captions - in both renderers. A recorded voiceover still works as before.
+
+Version 5.0.0 adds four switchable directions and a layered 3D stage. Use a camera arc to show how parts overlap, an exploded view to explain an assembly, a breakout to bring a cutout beyond a frame, or a tunnel to travel through successive layers. A web gallery can now play a screen recording inside its moving device and on the pop-out at the same time.
 
 ## 0. Setup (once per session)
 
@@ -39,7 +41,7 @@ python3 -m py_compile ~/.cache/promo-reel/promo_engine.py ~/.cache/promo-reel/pr
    Only if SKILL.md is not readable on disk, write the code blocks in the Engine and Web renderer sections verbatim to those paths (promo_web.py must sit next to promo_engine.py). If py_compile reports an error, fix that line.
 2. Check tools: `ffmpeg -version`, `python3 -c "import numpy, PIL; from PIL import features; print(features.check('raqm'))"`. If raqm is False: `pip install python-bidi --break-system-packages` (needed for correct Hebrew order). scipy is optional (only for synthesized fallback SFX); `qrcode` only if a QR is wanted.
 3. Fonts (Rubik, Heebo, Secular One, Frank Ruhl, Assistant, Rubik Dirt, Suez One, Karantina, Fredoka, Varela Round, Noto Sans Hebrew, Geist, Geist Mono) download automatically from Google Fonts on GitHub into ~/.cache/promo_fonts; if blocked, the engine falls back to local Hebrew fonts.
-4. Web renderer (needed only for `"renderer": "web"`): `python3 -c "import playwright" 2>/dev/null || pip install playwright --break-system-packages`, then `python3 ~/.cache/promo-reel/promo_web.py --check`. It uses a system Chrome (`/usr/bin/google-chrome`, Chromium, or the path in the `CHROME` environment variable). If it reports that no browser could start, try `python3 -m playwright install chromium` once; if the download is blocked, carry on - briefs with `"renderer": "web"` then render with the classic renderer in the premium style, and tell the user the video used the fallback.
+4. Web renderer (for web briefs, including the default 3D stage): `python3 -c "import playwright" 2>/dev/null || pip install playwright --break-system-packages`, then `python3 ~/.cache/promo-reel/promo_web.py --check`. It uses a system Chrome (`/usr/bin/google-chrome`, Chromium, or the path in the `CHROME` environment variable). If it reports that no browser could start, try `python3 -m playwright install chromium` once; if the download is blocked, carry on - briefs with `"renderer": "web"` then render with the classic renderer in the premium style, and tell the user the video used the fallback.
 5. Narration (needed only for generated narration, section 4b): an API key for the engine the brief uses. ElevenLabs: elevenlabs.io > Developers > API keys (a free account; a restricted key with Text to Speech access and Voices read is enough), read from `ELEVENLABS_API_KEY` or `~/.config/promo-reel/elevenlabs_key`. Gemini: aistudio.google.com > Get API key (free, no credit card), read from `GEMINI_API_KEY` or `~/.config/promo-reel/gemini_key`. When the user gives a key in the conversation, or asks Claude to create one in their signed-in browser, write it to that file (`mkdir -p ~/.config/promo-reel && chmod 700 ~/.config/promo-reel`, then the file with mode 600) and never put it in a brief, a log, a commit, memory or a reply. The workspace must be allowed to reach `api.elevenlabs.io` / `generativelanguage.googleapis.com`; if the engine reports that the network blocks it, ask the user to add the domain under claude.ai/settings/capabilities > Create and edit files > Allowed websites > Manage - Claude does not change network settings itself.
 6. Optional (about 1-2 minutes): `python3 $E --selftest` renders every scene type from synthetic media at draft size three times - as is, with `fx` energy 3 (every transition, camera hits, pop-outs), and with the web renderer (skipped, with the reason, when Chrome is not available) - and runs QA on each. The fx pass and the web pass also voice scene lines with an offline stand-in voice (no key needed) to check narration timing and captions, including captions on frames the camera moves. It must print `fx pass: ok`, `web pass: ok` (or `skipped`) and `SELFTEST PASS` (the short test CTA is expected to miss the 4 s rule). Run it after any change to the engine.
 
@@ -59,17 +61,17 @@ If the user sends a reference video ("make one like this"): analyze it first - c
 
 Write a short `creative_plan.md` in the project folder (it is a working file, not a deliverable):
 1. Goal (leads, bookings, awareness), audience, platform and length.
-2. Two or three distinct concepts, each as a table row: concept, the hook in the first 2.5 s, strengths, weaknesses. Different concepts differ in the opening and the story arc, not just in colours.
-3. Pick one and say why in two sentences (hook strength for muted viewers, clarity, what real assets exist).
-4. The script and timeline: scene, time, on-screen copy - from the formulas in section 2.
+2. Sketch two or three possible openings. For each, name the first thing the viewer sees, the action or change they will witness, and the source file and time (or exact layers) that support it.
+3. Choose an opening and a direction that suit the user's words and available assets. For a repeat request such as “מחר משהו אחר”, keep the recognizable product or brand detail and change the point of view and the rhythm. Use the prior direction when available in the conversation or previous brief.
+4. Write the timeline around that action. Lead the viewer's eye into the next shot with the same shape, position or movement. Give the result time to register and end with one clear action. Use the formulas in section 2 as starting points.
 Then write the brief and run `python3 $E brief.json --plan`: it prints the beat-snapped plan, writes `<out>_storyboard.md` (time, length, beats, copy, visual and transition per scene) and checks every text/graphic element against the frame edges and the platform's safe band - without rendering. Fix any layout error before previewing. Show the plan and storyboard to the user only if they want to approve copy first; never present a plan, storyboard or still frames as if they were the finished video.
 
 ## 2. Write the script
 
-What the strongest short-form ads have in common (research, Nov 2026):
-- The first 1.5-3 s decide reach. Open on the single best visual, bright and already moving, with the hook text on screen by 0.3 s. No logo intro, no black frames, no slow fade-in.
-- Most people watch muted: every scene carries its message in on-screen text short enough to read at a glance.
-- 15-30 s gets the best completion. One idea per shot, about 2-4 beats each, every cut on a beat.
+When writing a short-form ad, use the intended platform and the actual viewing experience to set the pace.
+- Open on a legible action or result in the first 1.5-3 s. A logo reveal works as an opening when the reveal itself is the subject.
+- Watch the opening muted. Use short on-screen copy where the action needs context.
+- For a 15-30 s ad, plan one idea per shot. Build towards a single accented moment. Shorten the approach, leave room for a pause, and let the viewer read the result on the next hold.
 - Sell the experience, not a listing: the view, coffee on the balcony, the bed - one feature per shot with a 1-3 word label.
 - Keep text in the safe band: the Reels/TikTok interface covers roughly the top 13% and bottom 24% (ads: bottom 35%).
 - End on one clear action (WhatsApp/phone), held long enough to read.
@@ -158,6 +160,41 @@ Set `"platform"` and the engine picks the format, the safe band and the length c
 
 Resolution: 1080 wide by default (1080x1920 for 9:16, 1920x1080 for 16:9). `"scale": 2` renders 4K (2160x3840 / 3840x2160) with vector-sharp text; it takes about 4 times as long, so render 4K only when it is asked for, after the 1080 version is approved.
 
+### 2b. Choose a direction and a 3D shot
+
+`direction` sets defaults for the whole brief. `stage3d.mode` chooses a camera move for one scene. A request for “the same product, a different film” can change the first field while keeping the source images, copy and brand. Set a scene's mode, intensity, transition or duration explicitly when that decision should carry through every direction.
+
+| What the user asks for | Direction to try | A shot to design |
+|---|---|---|
+| “יוקרתי, שיגלו את המוצר לאט” | `cinematic` | Ease around the silhouette, reveal the detail, hold on it |
+| “כמו שער מגזין” | `editorial` | Begin with a tight crop and cut to the full object framed by a short headline |
+| “שיקפוץ מהמסך” | `arcade` | Keep the frame visible as a part crosses it and place one sound on the reveal |
+| “תראה איך זה בנוי” | `showroom` | Separate the actual parts, hold on the gap, then show the product together |
+
+Start a new brief with `python3 $E --new stage3d > brief.json`. Use `python3 $E --list-directions` to see the available directions. To audition a second direction on the same brief, run `python3 $E brief.json --direction editorial --draft --out editorial.mp4`. Choose a different output name for each take. Leave the scene fields you want the direction to choose out of the brief. Explicit CLI directions add a direction suffix when the output name is omitted. Brand colours supplied in the brief or brand kit take priority over direction defaults. The starter and briefs containing a stage3d scene select the web renderer by default, unless the brief explicitly selects classic.
+
+Use `"renderer": "web"` for the CSS 3D stage. Put each visible piece on its own transparent PNG, preserving its position on the same square canvas. List the images from back to front. For example, a camera body sits behind its lens housing, which sits behind the glass. The lens can then cross the outer frame while its shadow and the overlap tell the viewer how far forward it moved. A single flat photo gives one flat plane. For a logo reveal, its transparent silhouette alone can work well. Without layer images, the stage builds a geometric sculpture in the brand colours. The classic fallback animates the same assets and title with simpler perspective and lighting.
+
+```json
+{
+  "renderer": "web",
+  "direction": "cinematic",
+  "scenes": [{
+    "type": "stage3d",
+    "mode": "breakout",
+    "title": "מחוץ למסגרת",
+    "intensity": 2,
+    "dur": 3,
+    "layers": [
+      {"src": "assets/body.png"},
+      {"src": "assets/lens.png"}
+    ]
+  }]
+}
+```
+
+For a product *action*, a screen recording often gives better proof than a layered still. Use a web `gallery` item such as `{"src":{"src":"assets/order.mp4","start":1.2},"play":true,"label":"אישור הזמנה"}`. A pop-out from that item follows the same frame as the device screen. Set `"play_videos": true` on a gallery to enable playback across its video items, or `"play": false` on an item for a poster. Playback starts at source time zero unless a start time is specified and holds the last frame if the clip ends first.
+
 ### 2c. Motion style and renderer
 
 Two independent choices, both optional:
@@ -172,7 +209,7 @@ Two independent choices, both optional:
 Hype levels: 1 - a zoom punch, camera shake and a brief colour split on every cut and impact sound; 2 - level 1 stronger, a punch on every beat, glitch bands on hits, light streaks and a ring burst on brand backgrounds, elements that slam in with a motion trail and keep bouncing to the beat, transitions rotated through cube, zoom_blur, slices, spin, shape, whip, diamond and glitch, a thump under each cut; 3 - level 2 at full strength with a white flash on hits. A calm scene can opt out with `"fx": false`. Feedback from real use: viewers read hype as amateurish when it runs for a whole ad - prefer premium (or the web renderer) for brands, and use hype only when the user asks for it.
 
 Web renderer details:
-- Draws: kinetic, title, contrast, gallery (phone or laptop, with pop-outs), wall, bundle, counter / stat / stats, logo, cta, plus narration and voiceover captions (word by word, the spoken word in the theme colour). Any other scene type sends the whole brief to the classic renderer (premium style) with a log line saying why - mixing renderers inside one video is not supported.
+- Draws: kinetic, title, contrast, gallery (phone or laptop, with pop-outs), stage3d, wall, bundle, counter / stat / stats, logo, cta, plus narration and voiceover captions (word by word, the spoken word in the theme colour). Any other scene type sends the whole brief to the classic renderer (premium style) with a log line saying why - mixing renderers inside one video is not supported.
 - Transitions: push, push_up, zoom_through, cube, shape, diamond, fade, blur, flash, cut; the classic names map onto them (zoom, punch, spin, glitch → zoom_through; whip, slide → push; slide_up, slices → push_up; leak → fade).
 - Top-level fields: `motion_blur` (samples per frame, 4; 1 with `--draft`; only moving frames take extra samples), `shutter` (0.5 of a frame).
 - Same commands as the classic renderer (`--plan`, `--preview`, `--frame`, `--draft`, `--qa`), same QA, cover and music-free version. Pop-outs are kept inside the frame automatically (a too-large `scale` is reduced). It has no scene cache: every full render redraws every frame, so look at `--frame` stills first.
@@ -267,12 +304,15 @@ Free tiers: both engines' free tiers have monthly or daily limits, the takes are
 
 ## 5. Brief, preview, render, QA
 
-Write `brief.json` (reference below; starters: `python3 $E --new property|service|tech > brief.json`, then replace every `<<...>>`), then:
+Write `brief.json` using the reference below or generate a starter with `--new property`, `--new service`, `--new tech` or `--new stage3d`. Replace any `<<...>>` placeholders before rendering.
+
 - `python3 $E brief.json --plan` - storyboard + layout check, no render (section 1b).
 - `python3 $E brief.json --preview --draft` - contact sheet of every scene (2 frames each) at half size, a few seconds. Look at it.
 - `python3 $E brief.json --frame 1.2,9,15,21,31` - full-size PNGs at those seconds; look at the busiest moments (hook, cards, device, CTA) before the full render. Check: Hebrew reads in order, no single word alone on a line, nothing touches the frame edge, text is outside the platform's UI zones.
 - `python3 $E brief.json` - final MP4 + `<out>_cover.jpg`, then automatic QA. About 1 minute per 30 s of 1080x1920 on 2 cores with the classic renderer (about 2.5 minutes with hype energy 2, 5-6 minutes with the web renderer); run it in the foreground with a long timeout. The plan printed first shows each scene's start, length, transition and clip.
-- Edits: change the brief and run again - only scenes whose content changed re-render (cache in `<out>_work/`, keyed by scene content, clip file contents, theme and engine version). A scene's cache also depends on the scene before it (transitions blend from its last frame). `--draft` writes separate `_draft` files. After editing the engine itself, delete `<out>_work/` so no stale scene is reused.
+- Classic renderer edits: change the brief and run again - only scenes whose content changed re-render (cache in `<out>_work/`, keyed by scene content, clip file contents, theme and engine version). A scene's cache also depends on the scene before it (transitions blend from its last frame). `--draft` writes separate `_draft` files. After editing the engine itself, delete `<out>_work/` so no stale scene is reused.
+
+For a moving 3D hero, play one draft at phone size before the final render. Check the instant just before the frame crossing, the peak separation and the settling pose. Make sure the silhouette reads, the layers stay registered when assembled, and captions leave the action visible. Watch the opening muted, then listen once for the accent and the voice. For a quick choice of style, `python3 $E brief.json --compare-directions --out looks.mp4` makes a short muted 2×2 film from the first stage3d scene. Its four panels reuse the subject, words and brand, each with its own default camera, intensity and any unspecified colours. The input brief stays intact. For briefs with no stage3d scene, use the stage3d starter or compare normal draft renders. When the user wants a choice between openings, render two or three short draft MP4s built from the opening scene(s). Keep the rest of the brief and the final cut for the chosen opening. For a single requested film, one selected moving draft is enough.
 
 Automatic QA (written after every render unless `--no-qa` or `"qa": false`; run it alone with `python3 $E brief.json --qa out.mp4`): `<out>_qa.md`, `<out>_qa.json` and `<out>_qa_sheet.jpg` (1 frame per second).
 
@@ -408,7 +448,8 @@ Top-level fields:
 - `music`: `file, start, volume (0.8), beat_sync (true)`. `voiceover`: `file, at, volume, text, captions (true), words_per_caption, caption_chars, caption_size, caption_y, duck (0.7 = how far the music dips under the voice), tts {engine (gemini) | elevenlabs, voice (Puck for Gemini), style, rate (1.0), model (auto), key_file, per_line}, lead (0.15), tail (0.35)` - music ducks under it; `text` turns on captions (section 4); `tts` generates the voice (section 4b). Scene fields `say` (the scene's spoken line) and `say_at` (seconds after the cut).
 - `sfx`: true | false | {name: path or {file, sync, max, gain}}; `sfx_volume` (0.55).
 - `variants`: [{name, scenes: {"<index in scenes>": {overrides}}}] - extra outputs `<out>_<name>.mp4` sharing the cache.
-- `renderer`: classic (default) | web - which renderer draws the frames (section 2c); `motion_blur` (4), `shutter` (0.5) for the web renderer.
+- `direction` (optional): cinematic | editorial | arcade | showroom. Applies defaults to fields left open in the brief. Select another with the CLI option `--direction NAME`.
+- `renderer`: classic | web - which renderer draws the frames (section 2c). A stage3d brief defaults to web. Other briefs default to classic. Use `motion_blur` (4), `shutter` (0.5) for the web renderer.
 - `fx`: {"style": "premium"} | {"energy": 0-3} | "premium" | "low" | "high" | "crazy" - motion style (section 2c); a scene can set `"fx": false` to stay calm.
 - `qa` (true): run QA after rendering; `cover_scene` (0): which scene the cover image is taken from; `music_free_version` (false): also write `<out>_no_music.mp4`.
 
@@ -439,7 +480,8 @@ Every scene accepts: `dur` or `beats` (length in music beats; needs music), `tra
 | text | lines [str or {text, style small\|body\|big\|accent, anim, size}], clip | 2.0 | punch |
 | cta | eyebrow, eyebrow_size (46), headline, headline_size (92), button (text or false), button_style cta\|primary (cta = the theme's cta colour), button_icon (true = chat icon; false = centered text pill), phone, website, qr (url), logo (true), tap_at, clip | 5.0 | zoom |
 | contrast | items [{text, mark x\|check, size (76 ✕ / 90 ✓)}], per (0.55), start (0.15), prompt (chat bar that types it), prompt_at, cps (14 characters/s), caption (shown until the ✓), caption2 (from the ✓; alone it appears with the ✓), highlight (words), caption_size (46), clip | start + per × items + 1.4, longer with a prompt | blur |
-| gallery | items [{src (image or clip spec), label, tag, icon, highlight}], per (0.7), kicker, device phone\|laptop, device_scale (1), swing (9), label_style pill\|headline (headline: laptop in portrait), label_size (72), pop true\|alternate\|false (item `pop`: true\|false\|{box [x0, y0, x1, y1] as fractions of the screenshot, radius (fraction of its width), scale (1.35 premium / 1.8 hype), at}), clip | 0.45 + per × items + 0.6 | zoom |
+| gallery | items [{src (image or clip spec), play (web), label, tag, icon, highlight}], play_videos (web, false), per (0.7), kicker, device phone\|laptop, device_scale (1), swing (9), label_style pill\|headline (headline: laptop in portrait), label_size (72), pop true\|alternate\|false (item `pop`: true\|false\|{box [x0, y0, x1, y1] as fractions of the screenshot, radius (fraction of its width), scale (1.35 premium / 1.8 hype), at}), clip | 0.45 + per × items + 0.6 | zoom |
+| stage3d | title (required), subtitle, mode breakout (default)\|orbit\|explode\|tunnel, intensity 1/2/3 (default 2), layers (optional, 1-6 images with `src`, back to front), dur | 3.0 or direction | cut or direction |
 | wall | images, cols (6), rows (5), tile_w (0.27 of width), tile_ratio (tile height/width, 1.9), wall_dim (0.6), wall_ry (-14), wall_rx (32), title, title_size (96), title_highlight (default: numbers), sub, quotes [{text, highlight, who, label, size}], quote_label, quotes_at (0.9), per_quote (1.9) | max(3, quotes_at + per_quote × quotes + 0.6) | blur |
 | bundle | items [{title, text, image, tags [text or {text, icon}], size (66)}] (up to 3), title, title_size (90), clip | 0.2 + 0.55 × items + 2.2 | slide_up |
 
@@ -447,7 +489,7 @@ Transitions: cut, flash, punch, fade, zoom, whip, slide, slide_up, glitch, blur,
 Icons (label, place, features, cards): pin, people, bed, view, waves, pool, star, sparkle, check, home, snow (air conditioning), wifi, parking, sun, heart, calendar, chat, phone, key, book, kitchen, coffee, clock, web, cart, layers, bolt, gear, code, chip, chart, rocket, search, lock. An unknown icon falls back to check (with a warning).
 Outputs: `<out>.mp4`, `<out>_cover.jpg`, `<out>_qa.md/.json`, `<out>_qa_sheet.jpg`, `<out>_storyboard.md` (`--plan`), `<out>_preview.jpg`, `<out>_frame_<t>.png`, `<out>_work/` (cache + plan.json with final timings).
 
-Command line: `python3 $E [brief.json] [--out FILE] [--format F] [--draft] [--preview] [--frame T,T] [--plan] [--qa VIDEO] [--creative h,c,p,a,m] [--no-qa] [--variant NAME] [--workers N] | --new property|service|tech | --brand-from DIR [--kit FILE] | --selftest | --history`.
+Command line: `python3 $E [brief.json] [--out FILE] [--format F] [--draft] [--preview] [--frame T,T] [--plan] [--qa VIDEO] [--creative h,c,p,a,m] [--no-qa] [--variant NAME] [--direction NAME] [--compare-directions] [--workers N] | --new property|service|tech|stage3d | --list-directions | --brand-from DIR [--kit FILE] | --selftest | --history`.
 
 ## Troubleshooting
 
@@ -486,15 +528,17 @@ Usage:
                           [--preview] [--frame SECONDS] [--draft] [--workers N]
 Needs: python3, numpy, Pillow (with raqm for RTL; else pip install python-bidi), ffmpeg.
 """
-import argparse, glob, hashlib, json, math, os, re, shutil, subprocess, sys, time, wave
+import argparse, copy, glob, hashlib, json, math, os, re, shutil, subprocess, sys, time, wave
 from concurrent.futures import ProcessPoolExecutor
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, features
 
-VERSION = "4.1.1"
+VERSION = "5.0.0"
 SEED_SALT = "3.0.0"  # frozen: keeps random choices stable across engine versions
 FFMPEG = shutil.which("ffmpeg") or "ffmpeg"
 SR = 48000
+# Leave headroom for transients after AAC encoding at the delivery sample rate.
+MASTER_AUDIO_FILTER = "loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000,alimiter=limit=0.75:level=0:latency=1"
 RAQM = features.check("raqm")
 if not RAQM:
     try:
@@ -551,6 +595,32 @@ PLATFORMS = {"reels": ("9x16", "reels", (15, 30)), "tiktok": ("9x16", "tiktok", 
              "shorts": ("9x16", "reels", (15, 45)), "stories": ("9x16", "reels", (5, 15)),
              "ads": ("9x16", "ads", (6, 30)), "feed": ("4x5", "full", (10, 30)), "square": ("1x1", "full", (10, 30)),
              "youtube": ("16x9", "full", (30, 120)), "promo": ("16x9", "full", (30, 90))}
+DIRECTIONS = {
+    "cinematic": {
+        "description": "Warm gold, elegant type, a breakout reveal and a slow orbit.",
+        "theme": {"preset": "gold", "type": "elegant", "grade": "warm", "bg_style": "tech"},
+        "fx": {"style": "premium"}, "modes": ("breakout", "orbit"), "intensity": 2,
+        "shot": 2.8, "stage": 3.8, "gallery_per": 1.6, "transitions": ("fade", "push"),
+    },
+    "editorial": {
+        "description": "Paper and blue, condensed headings, a side-on orbit and precise cuts.",
+        "theme": {"preset": "clean", "type": "condensed", "grade": "natural", "bg_style": "grid"},
+        "fx": {"energy": 0}, "modes": ("orbit", "explode"), "intensity": 1,
+        "shot": 2.2, "stage": 2.5, "gallery_per": 1.05, "transitions": ("cut", "push", "cut"),
+    },
+    "arcade": {
+        "description": "Neon orange and violet, short hits, a tunnel fly-through and a punch out.",
+        "theme": {"preset": "neon", "type": "bold", "grade": "punchy", "bg_style": "tech"},
+        "fx": {"style": "hype", "energy": 2}, "modes": ("tunnel", "breakout"), "intensity": 3,
+        "shot": 1.6, "stage": 1.9, "gallery_per": 0.68, "transitions": ("zoom_through", "diamond", "cut"),
+    },
+    "showroom": {
+        "description": "Cool cyan, technical type, an exploded product view and a measured orbit.",
+        "theme": {"preset": "tech", "type": "tech", "grade": "cool", "bg_style": "tech"},
+        "fx": {"style": "premium"}, "modes": ("explode", "orbit"), "intensity": 1,
+        "shot": 2.6, "stage": 3.4, "gallery_per": 1.4, "transitions": ("push", "fade"),
+    },
+}
 FONT_DIR = os.path.expanduser("~/.cache/promo_fonts")
 PHOTO_EXT = (".jpg", ".jpeg", ".png", ".webp", ".bmp")
 
@@ -3878,15 +3948,149 @@ def b_bundle(sc, ctx):
     return bg, els, sfx
 
 
-BUILDERS = {"hook": b_hook, "stamp": b_stamp, "logo": b_logo, "title": b_title, "collage": b_collage,
+# stage3d uses one normalized camera track for both the CSS stage and the classic fallback.
+STAGE_MODES = ("breakout", "orbit", "explode", "tunnel")
+
+
+def stage_geometry(ctx):
+    """Side-by-side on wide screens, stacked on phones. Units are relative to the safe band."""
+    band = ctx.bot - ctx.top
+    if ctx.land:
+        return (ctx.W * .34, ctx.cy, min(ctx.W * .40, band * .76),
+                ctx.W * .76, ctx.cy, ctx.W * .37)
+    return (ctx.W * .50, ctx.top + band * .38, min(ctx.W * .71, band * .55),
+            ctx.W * .50, ctx.top + band * .83, ctx.W * .86)
+
+
+def stage_pose(mode, intensity, p):
+    """Yaw, pitch, roll in degrees, then hero depth and layer separation as fractions of stage size."""
+    p = clamp(p)
+    amp = .7 + .15 * intensity
+    def ease(start, end):
+        return .5 - .5 * math.cos(math.pi * clamp((p - start) / (end - start)))
+    if mode == "orbit":
+        arc = (1 - 2 * p) * math.pi * .5
+        return (45 * amp * math.sin(arc), -9 + 7 * p, -5 + 10 * p, .09, .17 * amp)
+    if mode == "explode":
+        lift = ease(.06, .42) - ease(.70, .97)
+        return (-12 - 23 * lift * amp, 3 + 12 * lift, 4 * lift, .025, (.015 + .77 * lift) * amp)
+    if mode == "tunnel":
+        fly = ease(.02, .82)
+        return (15 - 24 * fly, -6 + 9 * fly, 10 * (1 - fly), -.93 + 1.12 * fly, .025)
+    launch = ease(.19, .45)
+    settle = ease(.45, .70)
+    z = -.32 - .12 * ease(0, .18) + .97 * launch - .20 * settle
+    return (-22 + 38 * launch - 7 * settle, 9 - 18 * launch + 4 * settle,
+            -7 + 11 * launch - 2 * settle, z * amp, .025 + .04 * (launch - settle))
+
+
+def stage_sfx(mode, dur):
+    cues = {"breakout": [(.19, "whoosh", .45), (.42, "impact", .7)],
+            "orbit": [(.18, "whoosh", .35)],
+            "explode": [(.12, "click", .45), (.34, "whoosh", .4), (.91, "click", .65)],
+            "tunnel": [(.14, "whoosh", .5), (.62, "whoosh", .4), (.79, "reveal", .5)]}
+    return [(frac * dur, name, gain) for frac, name, gain in cues[mode]]
+
+
+def stage_sculpture(ctx, size):
+    """Ray-shaded metal ring sections on matching transparent canvases, for graphic-only briefs."""
+    cache = getattr(ctx, "_stage_sculptures", {})
+    if size in cache:
+        return cache[size]
+    axis = (np.arange(size, dtype=np.float32) + .5) / size - .5
+    x, y = np.meshgrid(axis, axis)
+    r, theta = np.hypot(x, y), np.arctan2(y, x)
+    primary = np.array(ctx.c["primary"], np.float32)
+    secondary = np.array(ctx.c["primary2"], np.float32)
+    art = []
+    # A rounded triangular outline, a chromed interior and a coloured rim. The highlights
+    # follow the curved surface and transparent inner/outer edges survive the depth transforms.
+    for major, tube, phase, tint in ((.34, .073, .55, secondary), (.21, .058, -.1, primary), (.31, .063, -.46, primary)):
+        shape = 3 * theta + phase
+        d = (r - major - .052 * np.cos(shape)) / tube
+        nz = np.sqrt(np.maximum(0, 1 - np.clip(d, -1, 1) ** 2))
+        turn = .156 * np.sin(shape) / np.maximum(.1, r)
+        nx = d * (np.cos(theta) - turn * np.sin(theta))
+        ny = d * (np.sin(theta) + turn * np.cos(theta))
+        length = np.sqrt(nx * nx + ny * ny + nz * nz).clip(.01)
+        nx, ny, nz = nx / length, ny / length, nz / length
+        reflection = 2 * nz * (-.65 * nx - .75 * ny)
+        studio = .20 + .60 * np.clip(-nx * .35 - ny * .45 + nz * .4, 0, 1)
+        shine = .86 * np.exp(-((reflection - .35) / .13) ** 2) + .46 * np.exp(-((reflection + .60) / .09) ** 2)
+        rgb = tint * studio[..., None] + (250 - tint * .3) * shine[..., None]
+        alpha = np.clip((1 - np.abs(d)) * size * tube + .5, 0, 1) * 255
+        art.append(Image.fromarray(np.dstack((np.clip(rgb, 0, 255), alpha)).astype(np.uint8), "RGBA"))
+    cache[size] = art
+    ctx._stage_sculptures = cache
+    return art
+
+
+def b_stage3d(sc, ctx):
+    """Classic fallback: project the art planes, frame and titles without a browser."""
+    cx, cy, size, tx, ty, text_width = stage_geometry(ctx)
+    n = max(4, round(size))
+    mode, strength = sc.get("mode", "breakout"), sc.get("intensity", 2)
+    duration = sc.get("_dur", sc.get("dur", 3.0))
+    layers = []
+    for layer in sc.get("layers", []):
+        with Image.open(layer["src"]) as original:
+            im = original.convert("RGBA")
+        im.thumbnail((n, n), Image.LANCZOS)
+        canvas = Image.new("RGBA", (n, n))
+        canvas.alpha_composite(im, ((n - im.width) // 2, (n - im.height) // 2))
+        layers.append(canvas)
+    if not layers:
+        layers = stage_sculpture(ctx, n)
+    rim = Image.new("RGBA", (n, n))
+    pen = ImageDraw.Draw(rim)
+    rect = (n * .13, n * .18, n * .87, n * .82)
+    if mode == "orbit":
+        pen.ellipse((n * .05, n * .17, n * .95, n * .83), outline=ctx.c["primary"] + (145,), width=max(1, int(.005 * n)))
+    else:
+        pen.rounded_rectangle(rect, radius=n * .055, outline=ctx.c["muted"] + (165,), width=max(2, int(n * .012)))
+        pen.rounded_rectangle(rect, radius=n * .055, outline=ctx.c["primary"] + (255,), width=max(1, int(n * .004)))
+    def draw(out, t, bgf):
+        p = clamp(t / duration)
+        yaw, pitch, roll, z, spread = stage_pose(mode, strength, p)
+        yaw_r, pitch_r = math.radians(yaw), math.radians(pitch)
+        planes = []
+        for j, im in enumerate(layers):
+            depth = j / max(1, len(layers) - 1) - .5 if len(layers) > 1 else 0
+            planes.append((z + depth * spread, depth * spread, im))
+        if mode == "tunnel":
+            # The far aperture recedes as each near gate passes outside the stage.
+            for k in range(5):
+                gate_z = .55 - k * .72 + 1.75 * p
+                if gate_z < 1.05:
+                    planes.append((gate_z, 0, rim))
+        else:
+            planes.append((0, 0, rim))
+        for depth, separation, sprite in sorted(planes, key=lambda el: el[0]):
+            scale = 1.75 / (1.75 - depth)
+            x = (depth * math.sin(yaw_r) + separation * .12) * size * scale
+            y = (-depth * math.sin(pitch_r) - separation * .16) * size * scale
+            render_size = max(2, round(n * scale))
+            im = sprite.resize((render_size, render_size), Image.BILINEAR)
+            im = tilt(im, yaw, pitch)
+            if abs(roll) > .2:
+                im = im.rotate(-roll, Image.BILINEAR, expand=True)
+            over(out, np.asarray(im), cx + x - im.width / 2, cy + y - im.height / 2)
+    title = ctx.T(sc["title"], "display", 84, max_w=text_width)
+    sub = ctx.T(sc["subtitle"], "body", 38, color=ctx.c["muted"], max_w=text_width) if sc.get("subtitle") else None
+    lines = stack([title, sub], ty, (ctx.bot - ctx.top) * .25, [-22 * ctx.U])
+    elements = [Fn(draw)] + [Sprite(im, tx, y, 0, "none") for im, y in lines]
+    return {"kind": "panel"}, elements, stage_sfx(mode, duration)
+
+
+BUILDERS = {"stage3d": b_stage3d, "hook": b_hook, "stamp": b_stamp, "logo": b_logo, "title": b_title, "collage": b_collage,
             "showcase": b_showcase, "features": b_features, "location": b_location,
             "kinetic": b_kinetic, "cards": b_cards, "steps": b_steps, "device": b_device,
             "contrast": b_contrast, "gallery": b_gallery, "wall": b_wall, "bundle": b_bundle,
             "counter": b_counter, "checklist": b_checklist, "testimonial": b_testimonial,
             "before_after": b_before_after, "offer": b_offer, "text": b_text, "cta": b_cta}
-DEFAULT_DUR = {"kinetic": 2.2, "device": 3.0, "showcase": 2.0, "location": 2.6, "hook": 2.2, "stamp": 1.9, "logo": 2.5, "title": 1.3, "collage": 2.4, "counter": 2.0,
+DEFAULT_DUR = {"stage3d": 3.0, "kinetic": 2.2, "device": 3.0, "showcase": 2.0, "location": 2.6, "hook": 2.2, "stamp": 1.9, "logo": 2.5, "title": 1.3, "collage": 2.4, "counter": 2.0,
                "testimonial": 4.2, "before_after": 3.6, "offer": 2.8, "text": 2.0, "cta": 5.0}
-DEFAULT_TRANS = {"kinetic": "blur", "cards": "zoom", "steps": "slide_up", "device": "zoom",
+DEFAULT_TRANS = {"stage3d": "cut", "kinetic": "blur", "cards": "zoom", "steps": "slide_up", "device": "zoom",
                  "contrast": "blur", "gallery": "zoom", "wall": "blur", "bundle": "slide_up",
                  "showcase": "slide", "features": "zoom", "location": "zoom", "hook": "cut", "stamp": "glitch", "logo": "zoom", "title": "whip", "collage": "zoom",
                  "counter": "slide_up", "checklist": "zoom", "testimonial": "fade", "before_after": "whip",
@@ -3900,7 +4104,7 @@ TRANS_LEN = {"flash": 6, "zoom": 9, "whip": 9, "slide": 9, "slide_up": 9, "glitc
 # transitions rotated through automatically when fx energy >= 2 (scenes without their own transition)
 CRAZY_TRANS = ["cube", "zoom_blur", "slices", "spin", "shape", "whip", "diamond", "glitch"]
 # premium style: one consistent family, chosen by what the next scene is (scenes without their own transition)
-PREMIUM_TRANS = {"gallery": "zoom_through", "wall": "zoom_through", "cta": "zoom_through", "logo": "zoom_through",
+PREMIUM_TRANS = {"stage3d": "cut", "gallery": "zoom_through", "wall": "zoom_through", "cta": "zoom_through", "logo": "zoom_through",
                  "bundle": "cube", "cards": "cube", "device": "cube"}
 
 
@@ -4370,6 +4574,8 @@ def make_plan(brief, ctx, workdir):
         media = [sc.get("image")] + list(sc.get("images") or []) + \
                 [(it.get("src") or it.get("image")) for it in (sc.get("items") or []) if isinstance(it, dict)]
         srcs += [norm_clip(x)["src"] if isinstance(x, dict) else x for x in media if isinstance(x, (str, dict)) and x]
+        if sc["type"] == "stage3d":
+            srcs.extend(layer["src"] for layer in sc.get("layers", []))
         stamp = [(f, os.path.getmtime(f), os.path.getsize(f)) for f in srcs if f and os.path.exists(f)]
         caps = [c for c in ctx.captions if c["s"] < sc["_t0"] + sc["_dur"] and c["e"] > sc["_t0"]]
         def key_for(ver, prev):
@@ -5191,15 +5397,50 @@ def draw_captions(out, T, ctx):
 
 # ----------------------------------------------------------------- v3: brief loading, validation, recovery
 KNOWN_TYPES = set(BUILDERS) | {"services", "stats"}
-REQUIRED = {"hook": ["big"], "stamp": ["stamp"], "kinetic": ["lines"], "cards": ["items"], "steps": ["items"],
+REQUIRED = {"stage3d": ["title"], "hook": ["big"], "stamp": ["stamp"], "kinetic": ["lines"], "cards": ["items"], "steps": ["items"],
             "features": ["items"], "checklist": ["items"], "services": ["items"], "stats": ["items"],
             "before_after": ["before", "after"], "collage": [], "counter": ["value"],
             "contrast": ["items"], "gallery": ["items"], "wall": ["images"], "bundle": ["items"]}
 
 
-def load_brief(path):
-    """Read a brief and apply its brand kit (brand_kit: kit.json from --brand-from) and platform defaults."""
-    brief = json.load(open(path, encoding="utf-8"))
+def apply_direction(brief, name):
+    """Fill unspecified creative choices. Author and brand-kit settings take precedence."""
+    if not isinstance(name, str) or name not in DIRECTIONS:
+        raise SystemExit(f"[error] unknown direction {name!r}. Choose from {', '.join(DIRECTIONS)}.")
+    style = DIRECTIONS[name]
+    brief["direction"] = name
+    brief["theme"] = {**style["theme"], **brief.get("theme", {})}
+    brief.setdefault("fx", dict(style["fx"]))
+    stage_index = 0
+    for i, scene in enumerate(brief.get("scenes") or []):
+        kind = scene.get("type")
+        if i:
+            scene.setdefault("transition", style["transitions"][(i - 1) % len(style["transitions"])])
+        if kind == "stage3d":
+            scene.setdefault("mode", style["modes"][stage_index % len(style["modes"])])
+            stage_index += 1
+            scene.setdefault("intensity", style["intensity"])
+            if "beats" not in scene:
+                scene.setdefault("dur", style["stage"] if i else style["shot"])
+        elif kind in ("hook", "kinetic", "title", "showcase") and "beats" not in scene:
+            scene.setdefault("dur", style["shot"])
+        elif kind == "gallery":
+            scene.setdefault("per", style["gallery_per"])
+
+
+def load_brief(path, *, direction=None, variant=None, raw=None):
+    """Resolve a brief relative to its own path. A variant's scene overrides precede direction defaults."""
+    if raw is None:
+        with open(path, encoding="utf-8") as f:
+            brief = json.load(f)
+    else:
+        brief = copy.deepcopy(raw)
+    if variant is not None:
+        selected = next((v for v in brief.get("variants", []) if v.get("name") == variant), None)
+        if selected is None:
+            raise SystemExit(f"[error] brief has no variant named {variant!r}")
+        for idx, overrides in selected.get("scenes", {}).items():
+            brief["scenes"][int(idx)].update(overrides)
     base = os.path.dirname(os.path.abspath(path))
     kit_p = brief.get("brand_kit")
     if kit_p:
@@ -5217,6 +5458,11 @@ def load_brief(path):
     plat = PLATFORMS.get(brief.get("platform", ""))
     if plat and "format" not in brief:
         brief["format"] = plat[0]
+    selected_direction = direction if direction is not None else brief.get("direction")
+    if selected_direction is not None:
+        apply_direction(brief, selected_direction)
+    if any(scene.get("type") == "stage3d" for scene in brief.get("scenes") or []):
+        brief.setdefault("renderer", "web")
     return brief
 
 
@@ -5249,6 +5495,33 @@ def validate(brief):
             if len(ok) < len(sc["clips"]):
                 warns.append(f"scene {i} ({t}): {len(sc['clips']) - len(ok)} collage clip(s) missing - skipped")
             sc["clips"] = ok
+        if t == "stage3d":
+            where = f"scene {i} (stage3d)"
+            if sc.get("mode", "breakout") not in STAGE_MODES:
+                errs.append(f"{where}: mode must be one of {', '.join(STAGE_MODES)}")
+            if type(sc.get("intensity", 2)) is not int or sc.get("intensity", 2) not in (1, 2, 3):
+                errs.append(f"{where}: intensity must be 1, 2 or 3")
+            if not isinstance(sc.get("title"), str) or not sc.get("title", "").strip():
+                if sc.get("title"):
+                    errs.append(f"{where}: title must be nonempty text")
+            if "subtitle" in sc and not isinstance(sc["subtitle"], str):
+                errs.append(f"{where}: subtitle must be text")
+            layers = sc.get("layers", [])
+            if not isinstance(layers, list) or len(layers) > 6:
+                errs.append(f"{where}: layers must be a list of up to six image objects")
+            else:
+                resolved = []
+                for layer in layers:
+                    src = layer.get("src") if isinstance(layer, dict) else None
+                    if not isinstance(src, str) or not src or not is_photo(src):
+                        errs.append(f"{where}: each layer needs a supported image src")
+                    elif not os.path.isfile(src):
+                        warns.append(f"{where}: skipped missing layer '{src}'")
+                    else:
+                        resolved.append(layer)
+                if layers and not resolved:
+                    warns.append(f"{where}: using the geometric sculpture")
+                sc["layers"] = resolved
         if t == "gallery" and isinstance(sc.get("items"), list):
             keep = [it for it in sc["items"] if os.path.exists(norm_clip(it if isinstance(it, str) else it.get("src", ""))["src"])]
             if len(keep) < len(sc["items"]):
@@ -5385,6 +5658,12 @@ def brand_from(src, out_json):
 
 # ----------------------------------------------------------------- v3: templates and storyboard
 TEMPLATES = {
+    "stage3d": {"platform": "reels", "renderer": "web", "direction": "cinematic",
+                "scenes": [
+                    {"type": "stage3d", "title": "מחוץ למסגרת", "subtitle": "תנועה בתלת־ממד"},
+                    {"type": "stage3d", "title": "מכל זווית"},
+                    {"type": "stage3d", "title": "יורדים לפרטים"},
+                    {"type": "cta", "logo": False, "headline": "איזה כיוון נבחר?", "button": "בחרו סגנון", "dur": 4.2}]},
     "property": {"platform": "reels", "theme": {"preset": "gold", "type": "bold", "grade": "bright"},
                  "brand": {"name": "<<business name>>", "phone": "<<phone>>"},
                  "music": {"file": "assets/sfx/music.wav", "volume": 0.85},
@@ -5431,7 +5710,7 @@ def storyboard(scenes, brief, ctx, path):
         _, bpm = detect_beats(y)
     for i, sc in enumerate(scenes):
         copy = " / ".join(str(sc[k]) for k in ("small", "big", "big2", "label", "title", "sub", "place", "kicker", "line", "stamp",
-                                                "tagline", "headline", "button", "eyebrow", "note") if sc.get(k))
+                                                "tagline", "headline", "button", "eyebrow", "note", "subtitle") if sc.get(k))
         if sc.get("lines"):
             copy += " / ".join((l if isinstance(l, str) else l.get("text", "")) for l in sc["lines"])
         if sc.get("items"):
@@ -5439,6 +5718,9 @@ def storyboard(scenes, brief, ctx, path):
         c = sc.get("clip")
         vis = (norm_clip(c)["src"] + (" · " + norm_clip(c).get("move", "") if norm_clip(c).get("move") else "")) if c else \
             (f"{sc.get('device', 'phone')} · ui {sc.get('ui', 'dashboard')}" if sc["type"] == "device" else f"panel ({ctx.bg_style})")
+        if sc["type"] == "stage3d":
+            subject = ", ".join(layer["src"] for layer in sc.get("layers", [])) or "geometric sculpture"
+            vis = f"{sc.get('mode', 'breakout')} · {subject}".replace("|", "/")
         bt = f"{sc['_dur'] * bpm / 60:.1f}" if bpm else "-"
         rows.append(f"| {i} | {sc['_t0']:.2f}s | {sc['_dur']:.2f}s | {bt} | {sc['type']} | {copy.replace('|', '/')} | {vis} | {sc.get('transition')} |")
     total = sum(sc["_dur"] for sc in scenes)
@@ -5491,7 +5773,7 @@ def layout_issues(scenes, ctx):
     return errs, warns
 
 
-def qa(video, brief, scenes, ctx, creative=None, out_prefix=None):
+def qa(video, brief, scenes, ctx, creative=None, out_prefix=None, layout=None):
     """Automatic technical + structural checks with a 0-100 score. The creative part (25 pts) is a reviewer's judgement
     passed in as 5 numbers (hook, clarity, pacing, aesthetics/brand, message/CTA, 0-5 each); it is never auto-filled."""
     rep = {"file": video, "checks": [], "warnings": [], "errors": []}
@@ -5535,12 +5817,12 @@ def qa(video, brief, scenes, ctx, creative=None, out_prefix=None):
     sil = _ff(["-i", video, "-af", "silencedetect=n=-45dB:d=1.0", "-f", "null", "-"])
     silences = re.findall(r"silence_start: ([\d.]+)", sil)
     chk("no silent gaps (>1 s)", not silences, silences[:5], 5)
-    le, lw = layout_issues(scenes, ctx)
+    le, lw = layout if layout is not None else layout_issues(scenes, ctx)
     rep["errors"] += le
     rep["warnings"] += lw
     chk("no text or graphics cut off at the frame edge", not le, len(le), 5)
     first = scenes[0] if scenes else {}
-    chk("hook: first scene is a hook-type scene and <= 3 s", first.get("type") in ("hook", "kinetic", "showcase", "location", "contrast", "counter")
+    chk("hook: first scene is a hook-type scene and <= 3 s", first.get("type") in ("hook", "kinetic", "showcase", "location", "contrast", "counter", "stage3d")
         and first.get("_dur", 9) <= 3.0, f"{first.get('type')} {first.get('_dur', 0):.2f}s", 5)
     last = scenes[-1] if scenes else {}
     chk("ends on a CTA held >= 4 s", last.get("type") == "cta" and last.get("_dur", 0) >= 4.0, f"{last.get('type')} {last.get('_dur', 0):.2f}s", 5)
@@ -5650,7 +5932,7 @@ def selftest(workers=2):
                  {"type": "device", "ui": "flow", "title": "מכשיר", "dur": 1.4},
                  {"type": "contrast", "items": [{"text": "לא", "mark": "x"}, {"text": "כן", "mark": "check"}], "prompt": "בדיקת הקלדה",
                   "caption2": "כיתוב אחרי הסימון", "dur": 1.6},
-                 {"type": "gallery", "items": [{"src": "p0.jpg", "label": "תווית", "tag": "תגית"}, {"src": "v.mp4", "label": "וידאו"}],
+                 {"type": "gallery", "items": [{"src": "p0.jpg", "label": "תווית", "tag": "תגית"}, {"src": "v.mp4", "label": "וידאו", "play": True}],
                   "per": 0.5, "dur": 1.5},
                  {"type": "gallery", "device": "laptop", "items": [{"src": "p1.jpg", "label": "כותרת", "tag": "תגית"}], "dur": 1.0},
                  {"type": "wall", "title": "קיר 3 עבודות", "images": ["p0.jpg", "p1.jpg", "p2.jpg"],
@@ -5658,6 +5940,7 @@ def selftest(workers=2):
                  {"type": "bundle", "items": [{"title": "אחד", "text": "שורה", "image": "p2.jpg", "tags": ["תג"]}, {"title": "שתיים"}], "dur": 1.4},
                  {"type": "logo", "dur": 1.0},
                  {"type": "cta", "headline": "צרו קשר", "dur": 1.6}]}
+    brief["scenes"].insert(-1, {"type": "stage3d", "title": "תלת ממד", "mode": "explode", "dur": 1.0})
     bp = os.path.join(d, "brief.json")
     json.dump(brief, open(bp, "w"), ensure_ascii=False)
     t0 = __import__("time").time()
@@ -5685,7 +5968,7 @@ def selftest(workers=2):
     rep.setdefault("errors", []).extend("fx pass: " + e for e in rfx.get("errors", []))
     print("fx pass:", "ok" if os.path.exists(os.path.join(d, "selftest_fx.mp4")) and not rfx.get("errors") else "FAILED")
     # third pass: the browser renderer ("renderer": "web") on the scene types it draws
-    web_types = ("kinetic", "contrast", "gallery", "wall", "bundle", "logo", "cta")
+    web_types = ("kinetic", "contrast", "gallery", "wall", "bundle", "logo", "stage3d", "cta")
     bw = dict(brief, out="selftest_web.mp4", renderer="web", music_free_version=False,
               scenes=[dict(sc_) for sc_ in brief["scenes"] if sc_["type"] in web_types])
     # with generated narration (offline stand-in voice): scene lines, longer scenes, captions, ducking
@@ -5748,10 +6031,11 @@ def selftest(workers=2):
 
 # ----------------------------------------------------------------- main
 def run(brief_path, out, fmt, draft, workers, preview, frame_at, workdir=None, cleanup=True, creative=None, do_qa=True,
-        plan=False):
+        plan=False, brief=None):
     import time as _time
     t_start = _time.time()
-    brief = load_brief(brief_path)
+    if brief is None:
+        brief = load_brief(brief_path)
     base_dir = os.path.dirname(os.path.abspath(brief_path))
     os.chdir(base_dir)
     errs, warns = validate(brief)
@@ -5837,7 +6121,7 @@ def run(brief_path, out, fmt, draft, workers, preview, frame_at, workdir=None, c
     build_audio(brief, scenes, ctx, wav)
     tmp = stem + ".tmp.mp4"
     subprocess.run([FFMPEG, "-y", "-v", "error", "-i", vid, "-i", wav, "-map", "0:v", "-map", "1:a", "-c:v", "copy",
-                    "-af", "loudnorm=I=-14:TP=-1.5:LRA=11", "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
+                    "-af", MASTER_AUDIO_FILTER, "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
                     "-shortest", "-movflags", "+faststart", tmp], check=True)
     os.replace(tmp, out)
     if brief.get("music_free_version"):
@@ -5875,8 +6159,9 @@ def run(brief_path, out, fmt, draft, workers, preview, frame_at, workdir=None, c
         log(f"[log] could not write the production log: {ex}")
 
 
-def qa_only(brief_path, video, fmt, draft, creative):
-    brief = load_brief(brief_path)
+def qa_only(brief_path, video, fmt, draft, creative, brief=None):
+    if brief is None:
+        brief = load_brief(brief_path)
     os.chdir(os.path.dirname(os.path.abspath(brief_path)))
     validate(brief)
     ctx = Ctx(brief, fmt, draft)
@@ -5885,6 +6170,69 @@ def qa_only(brief_path, video, fmt, draft, creative):
     rep = qa(video, brief, scenes, ctx, creative, stem)
     print(stem + "_qa.md")
     print(json.dumps({k: rep[k] for k in ("auto_points", "score", "creative", "errors", "warnings") if k in rep}, ensure_ascii=False, indent=1))
+
+
+def compare_directions(brief_path, output=None, fmt=None):
+    """Render the same subject four ways as a short, muted motion study."""
+    from pathlib import Path
+    from tempfile import TemporaryDirectory
+
+    path = Path(brief_path).resolve()
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    subject = next((sc for sc in raw.get("scenes", []) if sc.get("type") == "stage3d"), None)
+    if subject is None:
+        raise SystemExit("[compare] choose a brief with a stage3d scene, or start with --new stage3d")
+    target = path.parent / (output or f"{path.stem}_directions.mp4")
+    if target.suffix.lower() != ".mp4":
+        raise SystemExit("[compare] the output must be an .mp4 file")
+    fmt = fmt or raw.get("format") or PLATFORMS.get(raw.get("platform"), ("9x16",))[0]
+    if fmt not in FORMATS:
+        raise SystemExit(f"[compare] unknown format {fmt}")
+    names = list(DIRECTIONS)
+    # Keep authored content and branding. The camera and timing are what this audition changes.
+    shot = {k: v for k, v in subject.items()
+            if k not in ("mode", "intensity", "dur", "beats", "say", "fx", "transition")}
+    sample = {k: raw[k] for k in ("brand", "brand_kit", "platform", "theme", "safe") if k in raw}
+    sample.update(scenes=[dict(shot, dur=3.0)], scale=1 / 3, fps=20, motion_blur=1, sfx=False)
+    renderer = raw.get("renderer", "web")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(prefix=".promo-compare-", dir=target.parent) as temp:
+        tile_paths = []
+        for name in names:
+            b = load_brief(str(path), direction=name, raw=sample)
+            tile = os.path.join(temp, name + ".mp4")
+            log(f"[compare] {name} / {b['scenes'][0]['mode']}")
+            previous_dir = os.getcwd()
+            try:
+                if renderer == "web":
+                    import promo_web
+                    promo_web.run_web(str(path), tile, fmt, False, 1, False, None, do_qa=False, brief=b)
+                else:
+                    run(str(path), tile, fmt, False, 1, False, None, do_qa=False, brief=b)
+            finally:
+                os.chdir(previous_dir)
+            tile_paths.append(tile)
+
+        w, h = (int(n * sample["scale"]) // 2 * 2 for n in FORMATS[fmt])
+        band = 42
+        overlay = Image.new("RGBA", (2 * w, 2 * (h + band)))
+        draw = ImageDraw.Draw(overlay)
+        font = _label_font()
+        for i, name in enumerate(names):
+            draw.text((i % 2 * w + 14, i // 2 * (h + band) + 11), name.upper(), font=font, fill="white")
+        png = os.path.join(temp, "labels.png")
+        overlay.save(png)
+        filters = [f"[{i}:v]pad=iw:ih+{band}:0:{band}:color=0x151619[v{i}]" for i in range(4)]
+        filters += ["[v0][v1][v2][v3]xstack=inputs=4:layout=0_0|w0_0|0_h0|w0_h0[grid]",
+                    "[grid][4:v]overlay=format=auto,format=yuv420p[v]"]
+        args = [FFMPEG, "-y", "-v", "error", "-filter_complex_threads", "1"]
+        for tile in tile_paths:
+            args += ["-i", tile]
+        result = os.path.join(temp, "comparison.mp4")
+        subprocess.run(args + ["-i", png, "-filter_complex", ";".join(filters), "-map", "[v]", "-an",
+                               "-c:v", "libx264", "-crf", "18", "-movflags", "+faststart", result], check=True)
+        os.replace(result, target)
+    print(target)
 
 
 def main():
@@ -5900,6 +6248,9 @@ def main():
     ap.add_argument("--creative", help="reviewer scores 0-5: hook,clarity,pacing,aesthetics,message e.g. 5,4,5,4,5")
     ap.add_argument("--no-qa", action="store_true")
     ap.add_argument("--new", choices=sorted(TEMPLATES), help="print a starter brief")
+    ap.add_argument("--direction", choices=DIRECTIONS, help="override the brief's art direction")
+    ap.add_argument("--list-directions", action="store_true", help="list the available art directions")
+    ap.add_argument("--compare-directions", action="store_true", help="render a four-way moving preview of the first 3D subject")
     ap.add_argument("--brand-from", metavar="DIR", help="extract a brand kit from a website folder/repo")
     ap.add_argument("--kit", default="brand_kit.json", help="output path for --brand-from")
     ap.add_argument("--selftest", action="store_true")
@@ -5907,41 +6258,47 @@ def main():
     ap.add_argument("--workers", type=int, default=max(1, min(4, os.cpu_count() or 2)))
     ap.add_argument("--variant", help="name of a variant in brief['variants'] to apply")
     a = ap.parse_args()
+    if a.list_directions:
+        for name, style in DIRECTIONS.items():
+            print(f"{name:10} {style['description']}")
+        return
     if a.selftest:
         sys.exit(selftest(a.workers))
     if a.history:
         return history()
     if a.new:
-        print(json.dumps(TEMPLATES[a.new], ensure_ascii=False, indent=1))
+        starter = dict(TEMPLATES[a.new])
+        if a.direction:
+            starter["direction"] = a.direction
+        print(json.dumps(starter, ensure_ascii=False, indent=1))
         return
     if a.brand_from:
         brand_from(a.brand_from, a.kit)
         return
     if not a.brief:
         ap.error("a brief.json is required")
+    if a.compare_directions:
+        return compare_directions(a.brief, a.out, a.format)
     creative = [x for x in a.creative.split(",")] if a.creative else None
-    brief = load_brief(a.brief)
+    bp = os.path.abspath(a.brief)
+    with open(bp, encoding="utf-8") as f:
+        raw = json.load(f)
+    brief = load_brief(bp, direction=a.direction, variant=a.variant, raw=raw)
     fmts = [a.format] if a.format else brief.get("formats", [brief.get("format", "9x16")])
     if a.qa:
-        return qa_only(a.brief, os.path.abspath(a.qa), fmts[0], a.draft, creative)
+        return qa_only(bp, os.path.abspath(a.qa), fmts[0], a.draft, creative, brief=brief)
     variants = [None]
     if a.variant:
         variants = [a.variant]
     elif brief.get("variants") and not (a.preview or a.frame is not None or a.plan):
         variants = [None] + [v["name"] for v in brief["variants"]]
-    raw = json.load(open(a.brief, encoding="utf-8"))
     for fmt in fmts:
         for var in variants:
-            bp = os.path.abspath(a.brief)
-            if var:
-                b2 = json.loads(json.dumps(raw))
-                v = next(v for v in raw["variants"] if v["name"] == var)
-                for idx, ov in v.get("scenes", {}).items():
-                    b2["scenes"][int(idx)].update(ov)
-                bp = os.path.join(os.path.dirname(bp), f".brief_{var}.json")
-                json.dump(b2, open(bp, "w"), ensure_ascii=False)
+            resolved = load_brief(bp, direction=a.direction, variant=var, raw=raw)
             out = a.out or brief.get("out", "promo.mp4")
-            stem, ext = os.path.splitext(os.path.abspath(out if os.path.isabs(out) else os.path.join(os.path.dirname(os.path.abspath(a.brief)), out)))
+            stem, ext = os.path.splitext(os.path.join(os.path.dirname(bp), out))
+            if a.direction and not a.out:
+                stem += "_" + a.direction
             if len(fmts) > 1 or fmt != brief.get("format", "9x16"):
                 stem += "_" + fmt
             if a.draft:
@@ -5949,15 +6306,15 @@ def main():
             wd = stem + "_work"
             if var:
                 stem += "_" + var
-            if load_brief(bp).get("renderer") == "web":
+            if resolved.get("renderer") == "web":
                 # the browser renderer (promo_web.py, next to this file): CSS 3D, motion blur, sharp type
                 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
                 import promo_web
                 promo_web.run_web(bp, stem + ext, fmt, a.draft, a.workers, a.preview, a.frame, wd, creative=creative,
-                                  do_qa=not a.no_qa, plan=a.plan)
+                                  do_qa=not a.no_qa, plan=a.plan, brief=resolved)
                 continue
             run(bp, stem + ext, fmt, a.draft, a.workers, a.preview, a.frame, wd, cleanup=len(variants) == 1,
-                creative=creative, do_qa=not a.no_qa, plan=a.plan)
+                creative=creative, do_qa=not a.no_qa, plan=a.plan, brief=resolved)
 
 
 if __name__ == "__main__":
@@ -5990,8 +6347,10 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from multiprocessing import Process
+from pathlib import Path
 
 import numpy as np
 from PIL import Image
@@ -5999,8 +6358,8 @@ from PIL import Image
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import promo_engine as pe  # noqa: E402
 
-WEB_VERSION = "4.1.0"
-WEB_TYPES = {"kinetic", "contrast", "gallery", "wall", "bundle", "cta", "logo", "counter", "stat", "stats", "title"}
+WEB_VERSION = "5.0.0"
+WEB_TYPES = {"stage3d", "kinetic", "contrast", "gallery", "wall", "bundle", "cta", "logo", "counter", "stat", "stats", "title"}
 TRANS_MAP = {"cut": "cut", "flash": "flash", "punch": "zoom_through", "fade": "fade", "zoom": "zoom_through",
              "whip": "push", "slide": "push", "slide_up": "push_up", "glitch": "zoom_through", "blur": "blur",
              "leak": "fade", "cube": "cube", "spin": "zoom_through", "zoom_blur": "zoom_through", "slices": "push_up",
@@ -6009,6 +6368,7 @@ TRANS_DUR = {"cut": 0, "flash": 0.3, "fade": 0.45, "blur": 0.5, "push": 0.55, "p
              "cube": 0.75, "shape": 0.65, "diamond": 0.65}
 TRANS_SFX = {"push": "whoosh", "push_up": "whoosh", "zoom_through": "whoosh", "cube": "whoosh", "shape": "whoosh",
              "diamond": "whoosh", "flash": "thump"}
+RENDER_ORIGIN = "http://127.0.0.1"
 
 
 def find_chrome():
@@ -6051,12 +6411,13 @@ class P:
         self.c = ctx.c
         self.land = ctx.land
         self.n_assets = 0
+        self.media_paths = {}
 
     def u(self, v):
         return f"{v * self.U:.2f}px"
 
     def asset(self, img, name=None, quality=93):
-        """Save a PIL image into the work folder and return its file URL."""
+        """Save a PIL image into the work folder and register it with the renderer."""
         self.n_assets += 1
         name = name or f"a{self.n_assets:03d}"
         ext = "png" if img.mode == "RGBA" else "jpg"
@@ -6066,11 +6427,15 @@ class P:
             img.save(p)
         else:
             img.convert("RGB").save(p, quality=quality)
-        return "file://" + os.path.abspath(p)
+        return self.src(p)
 
     def src(self, path):
-        """File URL of a brief media path (relative to the brief folder)."""
-        return "file://" + os.path.abspath(path)
+        """Register a local asset under an opaque same-origin URL."""
+        path = Path(path).resolve()
+        key = hashlib.sha256(os.fsencode(path)).hexdigest()[:24]
+        url = f"{RENDER_ORIGIN}/assets/{key}{path.suffix.lower()}"
+        self.media_paths[url] = str(path)
+        return url
 
     def still(self, spec):
         """Image path for a media spec: photos as they are; for a video, one frame (spec start, else 35% in)."""
@@ -6087,6 +6452,45 @@ class P:
         if not os.path.exists(p):
             raise SystemExit(f"[web] could not read a frame from {src}")
         return p
+
+    def gallery_clip(self, spec, duration):
+        """Extract just the visible interval once. Workers and pop-outs use the same seekable frames."""
+        src = Path(spec["src"]).resolve()
+        if not src.is_file():
+            raise SystemExit(f"[web] gallery video missing: {src}")
+        start, speed = float(spec.get("start", 0)), float(spec.get("speed", 1))
+        if not math.isfinite(start) or start < 0 or not math.isfinite(speed) or speed <= 0:
+            raise SystemExit(f"[web] gallery video needs a nonnegative start and a positive speed: {src}")
+        fps = self.ctx.fps
+        count = max(1, math.ceil(duration * fps) + 1)
+        limit = max(self.W, self.H)
+        st = src.stat()
+        key = f"{src}|{st.st_size}|{st.st_mtime_ns}|{start}|{speed}|{fps}|{count}|{limit}"
+        folder = Path(self.wd).resolve() / "web" / ("motion_" + hashlib.sha256(key.encode()).hexdigest()[:20])
+        if not folder.is_dir():
+            folder.parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.TemporaryDirectory(dir=folder.parent) as stage:
+                frames = Path(stage) / "frames"
+                frames.mkdir()
+                vf = (f"setpts=(PTS-STARTPTS)/{speed},fps={fps}:start_time=0:eof_action=pass,"
+                      f"scale='min(iw,{limit})':'min(ih,{limit})':force_original_aspect_ratio=decrease")
+                cmd = [pe.FFMPEG, "-v", "error", "-nostdin", "-ss", str(start), "-i", str(src), "-map", "0:v:0",
+                       "-vf", vf, "-frames:v", str(count), "-threads", "1", "-q:v", "2", str(frames / "%06d.jpg")]
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                if result.returncode or not (frames / "000001.jpg").is_file():
+                    reason = result.stderr.strip() or "no video frame at this start time"
+                    raise SystemExit(f"[web] could not read gallery video {src}: {reason}")
+                try:
+                    frames.rename(folder)
+                except OSError:
+                    if not folder.is_dir():  # A concurrent render may have already published the same frames.
+                        raise
+        base = f"{RENDER_ORIGIN}/frames/{folder.name}/"
+        count = sum(1 for _ in folder.glob("*.jpg"))
+        for frame in range(1, count + 1):
+            name = f"{frame:06d}.jpg"
+            self.media_paths[base + name] = str(folder / name)
+        return str(folder / "000001.jpg"), {"base": base, "count": count, "fps": fps}
 
 
 # ----------------------------------------------------------------- runtime (JS)
@@ -6177,6 +6581,7 @@ function resetLayer(el) {
 
 window.seek = function (t) {
   window.__t = t;
+  window.__galleryImages = [];
   const S = window.__scenes;
   if (window.__bg) window.__bg(t);
   $('flash').style.opacity = 0; $('ring').style.opacity = 0;
@@ -6287,12 +6692,12 @@ def grain_png(P):
     return P.asset(im, "grain")
 
 
-def fonts_css(ctx):
+def fonts_css(P):
     out = []
     for role in ("display", "heavy", "body", "mono", "stamp"):
-        name, wt = ctx.ts.get(role, ctx.ts["heavy"])
+        name, wt = P.ctx.ts.get(role, P.ctx.ts["heavy"])
         fp = pe.font_path(name)
-        out.append(f'@font-face {{ font-family: "R-{role}"; src: url("file://{os.path.abspath(fp)}"); font-weight: 100 900; }}')
+        out.append(f'@font-face {{ font-family: "R-{role}"; src: url("{P.src(fp)}"); font-weight: 100 900; }}')
         out.append(f".f-{role} {{ font-family: 'R-{role}', sans-serif; font-weight: {wt or 700}; }}")
     return "\n".join(out)
 
@@ -6585,7 +6990,14 @@ def w_gallery(sc, P, i):
     pops, js_items = [], []
     for k, it in enumerate(items):
         spec = pe.norm_clip(it["src"])
-        src = P.still(spec)
+        motion = None
+        if it.get("play", sc.get("play_videos", False)) and not pe.is_photo(spec["src"]):
+            # The outgoing item remains visible during the slide or the next scene's transition.
+            tail = 0.55 if k < n - 1 else max(TRANS_DUR.values())
+            src, motion = P.gallery_clip(spec, max(0.0, min(ends[k] + tail, dur + tail) - starts[k]))
+        else:
+            src = P.still(spec)
+        url = motion["base"] + "000001.jpg" if motion else P.src(src)
         im = Image.open(src)
         iw, ih = im.size
         fx, fy = spec.get("focus", [0.5, fy_def])
@@ -6595,7 +7007,7 @@ def w_gallery(sc, P, i):
         else:
             k_, ox, oy, dwi, dhi = _cover_map(iw, ih, sw, sh, fx, fy)
         scroll = max(0.0, min(dhi - sh, sh * 0.7)) if tall else 0.0
-        scr.append(f'<div class="item" id="{_sid(i, f"i{k}")}"><img src="{P.src(src)}" style="left:{ox:.1f}px;top:{oy:.1f}px;'
+        scr.append(f'<div class="item" id="{_sid(i, f"i{k}")}"><img src="{url}" style="left:{ox:.1f}px;top:{oy:.1f}px;'
                    f'width:{dwi:.1f}px;height:{dhi:.1f}px" id="{_sid(i, f"im{k}")}"></div>')
         pv = it.get("pop")
         if pv is None and sc.get("pop") not in (None, False):
@@ -6609,8 +7021,13 @@ def w_gallery(sc, P, i):
                 b = pe.pop_box(arr)
                 box = [b[0] / arr.shape[1], b[1] / arr.shape[0], b[2] / arr.shape[1], b[3] / arr.shape[0]]
             bx0, by0, bx1, by1 = box
-            piece = im.convert("RGB").crop((int(bx0 * iw), int(by0 * ih), int(bx1 * iw), int(by1 * ih)))
-            purl = P.asset(piece, f"pop_{i}_{k}")
+            if motion:
+                # Clip a second view of the very same frame to the chosen detail.
+                content = (f'<img id="{_sid(i, f"pi{k}")}" src="{url}" style="position:absolute;'
+                           f'left:{-bx0 * dwi:.2f}px;top:{-by0 * dhi:.2f}px;width:{dwi:.2f}px;height:{dhi:.2f}px">')
+            else:
+                piece = im.convert("RGB").crop((int(bx0 * iw), int(by0 * ih), int(bx1 * iw), int(by1 * ih)))
+                content = f'<img src="{P.asset(piece, f"pop_{i}_{k}")}">'
             px0, py0 = ox + bx0 * dwi, oy + by0 * dhi
             pw_, ph_ = (bx1 - bx0) * dwi, (by1 - by0) * dhi
             rr = float(pd.get("radius", 0.04 * min(bx1 - bx0, by1 - by0))) * dwi
@@ -6619,7 +7036,7 @@ def w_gallery(sc, P, i):
             direction = 1 if (bx0 + bx1) / 2 >= 0.5 else -1
             sc_ = float(pd.get("scale", 1.0))
             pops.append(f'<div class="pop" id="{_sid(i, f"p{k}")}" style="left:{sx + px0:.1f}px;top:{sy + py0:.1f}px;width:{pw_:.1f}px;'
-                        f'height:{ph_:.1f}px;border-radius:{rr:.1f}px"><img src="{purl}"></div>')
+                        f'height:{ph_:.1f}px;border-radius:{rr:.1f}px">{content}</div>')
             scr.append(f'<div class="slot" id="{_sid(i, f"q{k}")}" style="left:{px0:.1f}px;top:{py0:.1f}px;width:{pw_:.1f}px;'
                        f'height:{ph_:.1f}px;border-radius:{rr:.1f}px"></div>')
             out_x = min(W * 0.16, (W - dw_) / 2 + pw_ * 0.25) if kind == "phone" else W * 0.05
@@ -6638,7 +7055,8 @@ def w_gallery(sc, P, i):
             dx = (pc - W / 2) / f - cx0 + W / 2
             pop = {"at": at, "back": back, "x": dx, "z": pz,
                    "y": py_, "ry": -direction * 14, "s": sc_, "dir": direction}
-        js_items.append({"s": starts[k], "e": ends[k], "scroll": scroll, "pop": pop})
+        js_items.append({"s": starts[k], "e": ends[k], "scroll": scroll, "pop": pop, "motion": motion})
+        im.close()
     scr.append(island + '<div class="glare"></div></div>')
     deck = ""
     if kind != "phone":
@@ -6702,6 +7120,16 @@ def w_gallery(sc, P, i):
       pp.style.transform = `translate3d(${{P_.x * e}}px, ${{P_.y * e}}px, ${{P_.z * e}}px) rotateY(${{P_.ry * e}}deg) rotateX(${{6 * e}}deg) scale(${{1 + (P_.s - 1 + 0.05) * e}})`;
       pp.style.boxShadow = `0 ${{(30 + 80 * ea) * U}}px ${{(50 + 100 * ea) * U}}px rgba(0,0,0,${{0.12 + 0.48 * ea}}), 0 0 0 1px rgba(255,255,255,${{0.1 * ea}})`;
       sl.style.opacity = 0.55 * ea;
+    }}
+    if (it.motion && el.style.display !== 'none') {{
+      im.style.transform = 'none';
+      const frame = clamp(1 + Math.floor((t - it.s) * it.motion.fps + 0.001), 1, it.motion.count);
+      const url = it.motion.base + String(frame).padStart(6, '0') + '.jpg';
+      const detail = P_ && $('{_sid(i, 'p')}' + k).style.opacity !== '0' ? $('{_sid(i, 'pi')}' + k) : null;
+      for (const img of detail ? [im, detail] : [im]) {{
+        if (img.getAttribute('src') !== url) img.src = url;
+        window.__galleryImages.push(img);
+      }}
     }}
   }}
   const cc = $('{_sid(i, 'cc')}');
@@ -6920,15 +7348,116 @@ def w_counter(sc, P, i):
     return {"html": html, "js": js, "sfx": [(0.05, "whoosh", 0.35), (0.15 + cd * 0.85, "ding", 0.6)]}
 
 
-BUILDERS = {"kinetic": w_kinetic, "title": w_title, "contrast": w_contrast, "gallery": w_gallery, "wall": w_wall,
+# The same seekable camera track drives stills, motion-blur subframes, previews and full renders.
+STAGE_CSS = r"""
+.stage-view { position:absolute; direction:ltr; perspective:calc(var(--unit) * 1.75); }
+.stage-rig { position:absolute; inset:0; transform-style:preserve-3d; }
+.stage-part { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; }
+.stage-rim, .stage-back { position:absolute; left:11%; top:16%; width:78%; height:68%; box-sizing:border-box; border-radius:9% / 11%; }
+.stage-rim {
+  border:calc(var(--unit) * .014) solid color-mix(in srgb,var(--primary) 30%,#788491);
+  border-top-color:color-mix(in srgb,var(--primary) 19%,white); border-left-color:#a1a8ad;
+  border-bottom-color:#424b56;
+  box-shadow:inset 0 0 0 calc(var(--unit) * .004) #14191a,0 0 0 calc(var(--unit) * .003) #14191a,
+             0 0 0 calc(var(--unit) * .005) color-mix(in srgb,var(--primary) 65%,#eee);
+}
+.stage-rim::after { content:""; position:absolute; inset:-1.5%; border-radius:inherit; border-top:1px solid #fff9; }
+.stage-back {
+  background:radial-gradient(ellipse at 38% 24%,color-mix(in srgb,var(--primary) 16%,#14171e),#101217 72%);
+  border:1px solid #777b80; box-shadow:0 calc(var(--unit) * .035) calc(var(--unit) * .065) #0006;
+}
+.stage-orbit .stage-rim { inset:6% -4%; width:108%; height:88%; border-radius:50%; border-width:calc(var(--unit) * .003);
+  box-shadow:0 0 calc(var(--unit) * .012) color-mix(in srgb,var(--primary) 24%,transparent); }
+.stage-explode .stage-rim { border-width:calc(var(--unit) * .003); border-style:dashed; box-shadow:none; opacity:.53; }
+.stage-orbit .stage-rim::after, .stage-explode .stage-rim::after { display:none; }
+.stage-gate { position:absolute; inset:9% 5%; border-radius:12% / 16%; box-sizing:border-box;
+  border:calc(var(--unit) * .012) solid color-mix(in srgb,var(--primary2) 52%,#929ba5);
+  border-left-color:var(--primary); border-top-color:color-mix(in srgb,var(--primary) 65%,#fff);
+  box-shadow:0 0 calc(var(--unit) * .012) color-mix(in srgb,var(--primary) 45%,transparent),inset 0 0 0 calc(var(--unit) * .004) #1118; }
+.stage-shadow { position:absolute; top:82%; left:16%; width:68%; height:14%; border-radius:50%;
+  background:radial-gradient(ellipse closest-side,#0009,transparent); }
+.stage-copy { position:absolute; text-align:center; transform:translate(-50%,-50%); color:var(--text); }
+.stage-copy .stage-title { white-space:nowrap; line-height:1.18; font-weight:900; }
+.stage-copy .stage-sub { white-space:nowrap; line-height:1.25; color:var(--muted); margin-top:.24em; }
+"""
+
+
+def w_stage3d(sc, P, i):
+    """Perspective product stage with an actual depth-sorted rim and independent image planes."""
+    mode = sc.get("mode", "breakout")
+    intensity = sc.get("intensity", 2)
+    cx, cy, size, tx, ty, text_width = pe.stage_geometry(P.ctx)
+    scene_id = _sid(i, "stage")
+    if sc.get("layers"):
+        urls = [P.src(layer["src"]) for layer in sc["layers"]]
+    else:
+        # Slight supersampling keeps highlights smooth when a ring crosses the aperture.
+        art = pe.stage_sculpture(P.ctx, min(1000, max(48, int(size * 1.5))))
+        urls = [P.asset(im, f"stage-{i}-part-{j}") for j, im in enumerate(art)]
+    planes = "".join(f'<img class="stage-part" src="{_html.escape(url, quote=True)}" alt="">' for url in urls)
+    # The backplate sits behind even the anticipation pose; only the narrow lip intersects the product.
+    furniture = ('<div class="stage-back" style="transform:translateZ(calc(var(--unit) * -.65))"></div>'
+                 if mode == "breakout" else "")
+    if mode == "tunnel":
+        furniture += '<div class="stage-gate"></div>' * 5
+    else:
+        furniture += '<div class="stage-rim"></div>'
+    view = (f'<div class="stage-view stage-{mode}" id="{scene_id}" style="--unit:{size:.2f}px;'
+            f'left:{cx - size / 2:.2f}px;top:{cy - size / 2:.2f}px;width:{size:.2f}px;height:{size:.2f}px">'
+            f'<div class="stage-shadow"></div><div class="stage-rig">{furniture}{planes}</div></div>')
+    copy = []
+    for key, role, nominal, cls in (("title", "display", 84, "stage-title"), ("subtitle", "body", 38, "stage-sub")):
+        if not sc.get(key):
+            continue
+        font = P.ctx.font(role, nominal)
+        width = max(1, font.getlength(sc[key]))
+        fs = nominal * P.U * min(1, text_width * .93 / width)
+        copy.append(f'<div class="f-{role} txt fit {cls}" dir="auto" data-maxw="{text_width:.2f}" '
+                    f'style="font-size:{fs:.2f}px">{esc(sc[key])}</div>')
+    text_block = (f'<div class="stage-copy" style="left:{tx:.2f}px;top:{ty:.2f}px;width:{text_width:.2f}px">'
+                  f'{"".join(copy)}</div>')
+    # Small normalized track shared with the classic renderer; interpolation handles arbitrarily high frame rates.
+    track = [[round(v, 5) for v in pe.stage_pose(mode, intensity, n / 64)] for n in range(65)]
+    js = """(() => {
+      const root = $(ID), rig = root.querySelector('.stage-rig'), shadow = root.querySelector('.stage-shadow');
+      const parts = [...rig.querySelectorAll('.stage-part')], gates = [...rig.querySelectorAll('.stage-gate')];
+      const unit = UNIT, track = TRACK, mode = MODE;
+      return (t, d) => {
+        const p = clamp(t / d), pos = p * (track.length - 1), j = Math.min(track.length - 2, Math.floor(pos));
+        const [yaw,pitch,roll,z,spread] = track[j].map((v,k) => lerp(v,track[j+1][k],pos-j));
+        rig.style.transform = `rotateZ(${roll}deg) rotateX(${pitch}deg) rotateY(${yaw}deg)`;
+        const rim = rig.querySelector('.stage-rim');
+        if (rim && mode === 'orbit') rim.style.transform = `rotateX(${57 + 9*p}deg) rotateZ(${-22 + 44*p}deg)`;
+        parts.forEach((part,k) => {
+          const depth = parts.length > 1 ? k / (parts.length - 1) - .5 : 0;
+          const separation = spread * depth;
+          part.style.transform = `translate3d(${unit*separation*.12}px,${-unit*separation*.16}px,${unit*(z+separation)}px)`;
+          const lift = clamp((z+separation+.28)*1.5);
+          const dx = (-.005 - .019*lift - yaw*.00019)*unit, dy = (.013 + lift*.022)*unit;
+          part.style.filter = `drop-shadow(${dx}px ${dy}px ${(.0035+.009*lift)*unit}px rgba(3,5,8,.43))`;
+        });
+        gates.forEach((gate,k) => {
+          const gz = .55 - k*.72 + 1.75*p;
+          // Fade a gate as it goes around the lens; don't let it reappear behind the camera.
+          gate.style.opacity = clamp((1.42-gz)/.54) * clamp((gz+3)/.8) * .88;
+          gate.style.transform = `translateZ(${Math.min(gz,1.43)*unit}px) rotateZ(${(k-2)*5}deg)`;
+        });
+        shadow.style.transform = `translateX(${yaw*.0006*unit}px) scale(${1.12 - clamp(z+.3)*.33})`;
+        shadow.style.opacity = .9 - clamp(z+.3)*.4;
+      };
+    })()""".replace("ID", json.dumps(scene_id)).replace("UNIT", f"{size:.3f}").replace("TRACK", json.dumps(track)).replace("MODE", json.dumps(mode))
+    return {"html": view + text_block, "js": js, "sfx": pe.stage_sfx(mode, sc["_dur"])}
+
+
+BUILDERS = {"stage3d": w_stage3d, "kinetic": w_kinetic, "title": w_title, "contrast": w_contrast, "gallery": w_gallery, "wall": w_wall,
             "bundle": w_bundle, "cta": w_cta, "logo": w_logo, "counter": w_counter, "stat": w_counter, "stats": w_counter}
 
 
 # ----------------------------------------------------------------- page
 def build_page(scenes, brief, ctx, wd):
     P_ = P(ctx, wd)
-    css = "\n".join([fonts_css(ctx), root_css(P_), BASE_CSS.replace("__W__", str(P_.W)).replace("__H__", str(P_.H))
-                     .replace("__GRAIN__", grain_png(P_)), SCENE_CSS])
+    css = "\n".join([fonts_css(P_), root_css(P_), BASE_CSS.replace("__W__", str(P_.W)).replace("__H__", str(P_.H))
+                     .replace("__GRAIN__", grain_png(P_)), SCENE_CSS, STAGE_CSS])
     bg_html, bg_js = bg_layer(P_)
     layers, defs = [], []
     for i, sc in enumerate(scenes):
@@ -6967,10 +7496,11 @@ window.seek(0);
     path = os.path.join(wd, "web", "index.html")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     open(path, "w", encoding="utf-8").write(page)
+    Path(path).with_suffix(".assets.json").write_text(json.dumps(P_.media_paths), encoding="utf-8")
     return path
 
 
-CHROME_ARGS = ["--no-sandbox", "--allow-file-access-from-files", "--disable-background-networking", "--disable-component-update",
+CHROME_ARGS = ["--no-sandbox", "--disable-background-networking", "--disable-component-update",
                "--disable-sync", "--no-first-run", "--disable-default-apps", "--metrics-recording-only", "--mute-audio",
                "--font-render-hinting=none", "--force-color-profile=srgb", "--hide-scrollbars"]
 
@@ -6983,15 +7513,31 @@ class Page:
         self.pw = sync_playwright().start()
         exe = find_chrome()
         self.br = self.pw.chromium.launch(executable_path=exe, args=CHROME_ARGS) if exe else self.pw.chromium.launch(args=CHROME_ARGS)
-        self.pg = self.br.new_page(viewport={"width": W, "height": H}, device_scale_factor=1)
-        self.pg.goto("file://" + os.path.abspath(html))
+        self.pg = self.br.new_page(viewport={"width": W, "height": H}, device_scale_factor=1, service_workers="block")
+        entry = RENDER_ORIGIN + "/index.html"
+        paths = json.loads(Path(html).with_suffix(".assets.json").read_text(encoding="utf-8"))
+        paths[entry] = str(Path(html).resolve())
+
+        def serve(route):
+            path = paths.get(route.request.url)
+            if path and route.request.method == "GET" and os.path.isfile(path):
+                route.fulfill(path=path)
+            else:
+                route.abort("blockedbyclient")
+
+        # Serve just this render's registered files in-process. No web server or file:// access is required.
+        self.pg.context.route("**/*", serve)
+        self.pg.goto(entry)
         self.pg.evaluate("document.fonts.ready")
         self.pg.wait_for_load_state("networkidle")
         self.pg.evaluate("Promise.all([...document.images].map(i => i.decode().catch(() => 0)))")
         self.pg.evaluate("window.__fit()")
 
     def grab(self, t, png=False):
-        self.pg.evaluate(f"window.seek({t:.5f})")
+        self.pg.evaluate("""t => {
+          window.seek(t);
+          if (window.__galleryImages.length) return Promise.all(window.__galleryImages.map(im => im.decode()));
+        }""", round(t, 5))
         b = self.pg.screenshot(type="png") if png else self.pg.screenshot(type="jpeg", quality=93)
         return np.asarray(Image.open(io.BytesIO(b)).convert("RGB"))
 
@@ -7072,20 +7618,15 @@ def browser_problem():
     return None
 
 
-def classic(brief_path, out, fmt, draft, workers, preview, frame_at, workdir, creative, do_qa, plan, why):
+def classic(brief_path, out, fmt, draft, workers, preview, frame_at, workdir, creative, do_qa, plan, why, brief):
     """Render with the classic engine in its premium style (closest look to the web renderer)."""
     if why:
         pe.log(f"[web] {why} - rendering with the classic renderer (premium style)")
-    b = json.load(open(brief_path, encoding="utf-8"))
-    b.pop("renderer", None)
-    b.setdefault("fx", {"style": "premium"})
-    tmp = os.path.join(os.path.dirname(os.path.abspath(brief_path)), "." + os.path.basename(brief_path) + ".classic.json")
-    json.dump(b, open(tmp, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
-    try:
-        return pe.run(tmp, out, fmt, draft, workers, preview, frame_at, workdir, creative=creative, do_qa=do_qa, plan=plan)
-    finally:
-        if os.path.exists(tmp):
-            os.remove(tmp)
+    fallback = dict(brief)
+    fallback.pop("renderer", None)
+    fallback.setdefault("fx", {"style": "premium"})
+    return pe.run(brief_path, out, fmt, draft, workers, preview, frame_at, workdir, creative=creative,
+                  do_qa=do_qa, plan=plan, brief=fallback)
 
 
 def unsupported(brief):
@@ -7093,21 +7634,23 @@ def unsupported(brief):
 
 
 def run_web(brief_path, out, fmt, draft, workers, preview, frame_at, workdir=None, creative=None, do_qa=True, plan=False,
-            samples=None):
+            samples=None, brief=None):
     t_start = time.time()
     brief_path = os.path.abspath(brief_path)
-    brief = pe.load_brief(brief_path)
+    if brief is None:
+        brief = pe.load_brief(brief_path)
     base_dir = os.path.dirname(os.path.abspath(brief_path))
     os.chdir(base_dir)
     bad = unsupported(brief)
     if bad:
         return classic(brief_path, out, fmt, draft, workers, preview, frame_at, workdir, creative, do_qa, plan,
-                       f"the web renderer does not support scene types {', '.join(bad)} yet")
+                       f"the web renderer does not support scene types {', '.join(bad)} yet", brief)
     if plan:
-        return pe.run(brief_path, out, fmt, draft, workers, preview, frame_at, workdir, creative=creative, do_qa=do_qa, plan=True)
+        return pe.run(brief_path, out, fmt, draft, workers, preview, frame_at, workdir, creative=creative,
+                      do_qa=do_qa, plan=True, brief=brief)
     prob = browser_problem()
     if prob:
-        return classic(brief_path, out, fmt, draft, workers, preview, frame_at, workdir, creative, do_qa, plan, prob)
+        return classic(brief_path, out, fmt, draft, workers, preview, frame_at, workdir, creative, do_qa, plan, prob, brief)
     errs, warns = pe.validate(brief)
     for w_ in warns:
         pe.log("[warn] " + w_)
@@ -7166,7 +7709,7 @@ def run_web(brief_path, out, fmt, draft, workers, preview, frame_at, workdir=Non
     pe.build_audio(brief, scenes, ctx, wav)
     tmp = stem + ".tmp.mp4"
     subprocess.run([pe.FFMPEG, "-y", "-v", "error", "-i", vid, "-i", wav, "-map", "0:v", "-map", "1:a", "-c:v", "copy",
-                    "-af", "loudnorm=I=-14:TP=-1.5:LRA=11", "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
+                    "-af", pe.MASTER_AUDIO_FILTER, "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
                     "-shortest", "-movflags", "+faststart", tmp], check=True)
     os.replace(tmp, out)
     if brief.get("music_free_version"):
@@ -7191,8 +7734,7 @@ def run_web(brief_path, out, fmt, draft, workers, preview, frame_at, workdir=Non
     print(out)
     rep = None
     if do_qa and brief.get("qa", True):
-        pe.layout_issues = lambda sc_, cx_: (errs_l, warns_l)
-        rep = pe.qa(out, brief, scenes, ctx, creative, stem)
+        rep = pe.qa(out, brief, scenes, ctx, creative, stem, layout=(errs_l, warns_l))
         pe.log(f"[qa] automatic {rep['auto_points']}/75" + (f", total {rep['score']}/100" if rep.get("score") is not None else
                                                              " (creative review pending)") +
                f", {len(rep['errors'])} errors, {len(rep['warnings'])} warnings -> {stem}_qa.md")

@@ -1,0 +1,130 @@
+{
+  "out": "frame_01.mp4",
+  "platform": "reels",
+  "format": "9x16",
+  "renderer": "web",
+  "brand": {
+    "name": "FRAME 01",
+    "corner_logo": false
+  },
+  "theme": {
+    "preset": "tech",
+    "type": "tech",
+    "bg_style": "tech",
+    "bg": "#0C1013",
+    "primary": "#FF6F45",
+    "primary2": "#77ADB2",
+    "hi": "#FFEAD8",
+    "text": "#F4F1E9",
+    "muted": "#BBC3BF"
+  },
+  "music": {
+    "file": "stage3d-assets/shutter.ogg",
+    "volume": 0.9,
+    "beat_sync": false
+  },
+  "sfx": false,
+  "scenes": [
+    {
+      "type": "stage3d",
+      "mode": "breakout",
+      "layers": [
+        {
+          "src": "stage3d-assets/body.png"
+        },
+        {
+          "src": "stage3d-assets/front-plate.png"
+        },
+        {
+          "src": "stage3d-assets/lens-barrel.png"
+        },
+        {
+          "src": "stage3d-assets/optical-glass.png"
+        }
+      ],
+      "title": "מחוץ למסגרת",
+      "subtitle": "FRAME 01",
+      "dur": 2.5,
+      "intensity": 3,
+      "transition": "cut"
+    },
+    {
+      "type": "stage3d",
+      "mode": "orbit",
+      "layers": [
+        {
+          "src": "stage3d-assets/body.png"
+        },
+        {
+          "src": "stage3d-assets/front-plate.png"
+        },
+        {
+          "src": "stage3d-assets/lens-barrel.png"
+        },
+        {
+          "src": "stage3d-assets/optical-glass.png"
+        }
+      ],
+      "title": "סיבוב של אור",
+      "subtitle": "מהגוף אל העדשה",
+      "dur": 3.0,
+      "intensity": 2,
+      "transition": "cut"
+    },
+    {
+      "type": "stage3d",
+      "mode": "explode",
+      "layers": [
+        {
+          "src": "stage3d-assets/body.png"
+        },
+        {
+          "src": "stage3d-assets/front-plate.png"
+        },
+        {
+          "src": "stage3d-assets/lens-barrel.png"
+        },
+        {
+          "src": "stage3d-assets/optical-glass.png"
+        }
+      ],
+      "title": "מה יש בפנים?",
+      "subtitle": "ארבע שכבות. קליק אחד.",
+      "dur": 3.5,
+      "intensity": 3,
+      "transition": "cut"
+    },
+    {
+      "type": "stage3d",
+      "mode": "tunnel",
+      "layers": [
+        {
+          "src": "stage3d-assets/body.png"
+        },
+        {
+          "src": "stage3d-assets/front-plate.png"
+        },
+        {
+          "src": "stage3d-assets/lens-barrel.png"
+        },
+        {
+          "src": "stage3d-assets/optical-glass.png"
+        }
+      ],
+      "title": "דרך העדשה",
+      "subtitle": "הרגע נכנס לפוקוס",
+      "dur": 2.5,
+      "intensity": 3,
+      "transition": "cut"
+    },
+    {
+      "type": "cta",
+      "eyebrow": "FRAME 01",
+      "headline": "צאו לתפוס רגע.",
+      "button": false,
+      "logo": false,
+      "dur": 4.0,
+      "transition": "fade"
+    }
+  ]
+}

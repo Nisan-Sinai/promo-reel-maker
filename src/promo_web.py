@@ -19,8 +19,10 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from multiprocessing import Process
+from pathlib import Path
 
 import numpy as np
 from PIL import Image
@@ -28,8 +30,8 @@ from PIL import Image
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import promo_engine as pe  # noqa: E402
 
-WEB_VERSION = "4.1.0"
-WEB_TYPES = {"kinetic", "contrast", "gallery", "wall", "bundle", "cta", "logo", "counter", "stat", "stats", "title"}
+WEB_VERSION = "5.0.0"
+WEB_TYPES = {"stage3d", "kinetic", "contrast", "gallery", "wall", "bundle", "cta", "logo", "counter", "stat", "stats", "title"}
 TRANS_MAP = {"cut": "cut", "flash": "flash", "punch": "zoom_through", "fade": "fade", "zoom": "zoom_through",
              "whip": "push", "slide": "push", "slide_up": "push_up", "glitch": "zoom_through", "blur": "blur",
              "leak": "fade", "cube": "cube", "spin": "zoom_through", "zoom_blur": "zoom_through", "slices": "push_up",
@@ -38,6 +40,7 @@ TRANS_DUR = {"cut": 0, "flash": 0.3, "fade": 0.45, "blur": 0.5, "push": 0.55, "p
              "cube": 0.75, "shape": 0.65, "diamond": 0.65}
 TRANS_SFX = {"push": "whoosh", "push_up": "whoosh", "zoom_through": "whoosh", "cube": "whoosh", "shape": "whoosh",
              "diamond": "whoosh", "flash": "thump"}
+RENDER_ORIGIN = "http://127.0.0.1"
 
 
 def find_chrome():
@@ -80,12 +83,13 @@ class P:
         self.c = ctx.c
         self.land = ctx.land
         self.n_assets = 0
+        self.media_paths = {}
 
     def u(self, v):
         return f"{v * self.U:.2f}px"
 
     def asset(self, img, name=None, quality=93):
-        """Save a PIL image into the work folder and return its file URL."""
+        """Save a PIL image into the work folder and register it with the renderer."""
         self.n_assets += 1
         name = name or f"a{self.n_assets:03d}"
         ext = "png" if img.mode == "RGBA" else "jpg"
@@ -95,11 +99,15 @@ class P:
             img.save(p)
         else:
             img.convert("RGB").save(p, quality=quality)
-        return "file://" + os.path.abspath(p)
+        return self.src(p)
 
     def src(self, path):
-        """File URL of a brief media path (relative to the brief folder)."""
-        return "file://" + os.path.abspath(path)
+        """Register a local asset under an opaque same-origin URL."""
+        path = Path(path).resolve()
+        key = hashlib.sha256(os.fsencode(path)).hexdigest()[:24]
+        url = f"{RENDER_ORIGIN}/assets/{key}{path.suffix.lower()}"
+        self.media_paths[url] = str(path)
+        return url
 
     def still(self, spec):
         """Image path for a media spec: photos as they are; for a video, one frame (spec start, else 35% in)."""
@@ -116,6 +124,45 @@ class P:
         if not os.path.exists(p):
             raise SystemExit(f"[web] could not read a frame from {src}")
         return p
+
+    def gallery_clip(self, spec, duration):
+        """Extract just the visible interval once. Workers and pop-outs use the same seekable frames."""
+        src = Path(spec["src"]).resolve()
+        if not src.is_file():
+            raise SystemExit(f"[web] gallery video missing: {src}")
+        start, speed = float(spec.get("start", 0)), float(spec.get("speed", 1))
+        if not math.isfinite(start) or start < 0 or not math.isfinite(speed) or speed <= 0:
+            raise SystemExit(f"[web] gallery video needs a nonnegative start and a positive speed: {src}")
+        fps = self.ctx.fps
+        count = max(1, math.ceil(duration * fps) + 1)
+        limit = max(self.W, self.H)
+        st = src.stat()
+        key = f"{src}|{st.st_size}|{st.st_mtime_ns}|{start}|{speed}|{fps}|{count}|{limit}"
+        folder = Path(self.wd).resolve() / "web" / ("motion_" + hashlib.sha256(key.encode()).hexdigest()[:20])
+        if not folder.is_dir():
+            folder.parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.TemporaryDirectory(dir=folder.parent) as stage:
+                frames = Path(stage) / "frames"
+                frames.mkdir()
+                vf = (f"setpts=(PTS-STARTPTS)/{speed},fps={fps}:start_time=0:eof_action=pass,"
+                      f"scale='min(iw,{limit})':'min(ih,{limit})':force_original_aspect_ratio=decrease")
+                cmd = [pe.FFMPEG, "-v", "error", "-nostdin", "-ss", str(start), "-i", str(src), "-map", "0:v:0",
+                       "-vf", vf, "-frames:v", str(count), "-threads", "1", "-q:v", "2", str(frames / "%06d.jpg")]
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                if result.returncode or not (frames / "000001.jpg").is_file():
+                    reason = result.stderr.strip() or "no video frame at this start time"
+                    raise SystemExit(f"[web] could not read gallery video {src}: {reason}")
+                try:
+                    frames.rename(folder)
+                except OSError:
+                    if not folder.is_dir():  # A concurrent render may have already published the same frames.
+                        raise
+        base = f"{RENDER_ORIGIN}/frames/{folder.name}/"
+        count = sum(1 for _ in folder.glob("*.jpg"))
+        for frame in range(1, count + 1):
+            name = f"{frame:06d}.jpg"
+            self.media_paths[base + name] = str(folder / name)
+        return str(folder / "000001.jpg"), {"base": base, "count": count, "fps": fps}
 
 
 # ----------------------------------------------------------------- runtime (JS)
@@ -206,6 +253,7 @@ function resetLayer(el) {
 
 window.seek = function (t) {
   window.__t = t;
+  window.__galleryImages = [];
   const S = window.__scenes;
   if (window.__bg) window.__bg(t);
   $('flash').style.opacity = 0; $('ring').style.opacity = 0;
@@ -316,12 +364,12 @@ def grain_png(P):
     return P.asset(im, "grain")
 
 
-def fonts_css(ctx):
+def fonts_css(P):
     out = []
     for role in ("display", "heavy", "body", "mono", "stamp"):
-        name, wt = ctx.ts.get(role, ctx.ts["heavy"])
+        name, wt = P.ctx.ts.get(role, P.ctx.ts["heavy"])
         fp = pe.font_path(name)
-        out.append(f'@font-face {{ font-family: "R-{role}"; src: url("file://{os.path.abspath(fp)}"); font-weight: 100 900; }}')
+        out.append(f'@font-face {{ font-family: "R-{role}"; src: url("{P.src(fp)}"); font-weight: 100 900; }}')
         out.append(f".f-{role} {{ font-family: 'R-{role}', sans-serif; font-weight: {wt or 700}; }}")
     return "\n".join(out)
 
@@ -614,7 +662,14 @@ def w_gallery(sc, P, i):
     pops, js_items = [], []
     for k, it in enumerate(items):
         spec = pe.norm_clip(it["src"])
-        src = P.still(spec)
+        motion = None
+        if it.get("play", sc.get("play_videos", False)) and not pe.is_photo(spec["src"]):
+            # The outgoing item remains visible during the slide or the next scene's transition.
+            tail = 0.55 if k < n - 1 else max(TRANS_DUR.values())
+            src, motion = P.gallery_clip(spec, max(0.0, min(ends[k] + tail, dur + tail) - starts[k]))
+        else:
+            src = P.still(spec)
+        url = motion["base"] + "000001.jpg" if motion else P.src(src)
         im = Image.open(src)
         iw, ih = im.size
         fx, fy = spec.get("focus", [0.5, fy_def])
@@ -624,7 +679,7 @@ def w_gallery(sc, P, i):
         else:
             k_, ox, oy, dwi, dhi = _cover_map(iw, ih, sw, sh, fx, fy)
         scroll = max(0.0, min(dhi - sh, sh * 0.7)) if tall else 0.0
-        scr.append(f'<div class="item" id="{_sid(i, f"i{k}")}"><img src="{P.src(src)}" style="left:{ox:.1f}px;top:{oy:.1f}px;'
+        scr.append(f'<div class="item" id="{_sid(i, f"i{k}")}"><img src="{url}" style="left:{ox:.1f}px;top:{oy:.1f}px;'
                    f'width:{dwi:.1f}px;height:{dhi:.1f}px" id="{_sid(i, f"im{k}")}"></div>')
         pv = it.get("pop")
         if pv is None and sc.get("pop") not in (None, False):
@@ -638,8 +693,13 @@ def w_gallery(sc, P, i):
                 b = pe.pop_box(arr)
                 box = [b[0] / arr.shape[1], b[1] / arr.shape[0], b[2] / arr.shape[1], b[3] / arr.shape[0]]
             bx0, by0, bx1, by1 = box
-            piece = im.convert("RGB").crop((int(bx0 * iw), int(by0 * ih), int(bx1 * iw), int(by1 * ih)))
-            purl = P.asset(piece, f"pop_{i}_{k}")
+            if motion:
+                # Clip a second view of the very same frame to the chosen detail.
+                content = (f'<img id="{_sid(i, f"pi{k}")}" src="{url}" style="position:absolute;'
+                           f'left:{-bx0 * dwi:.2f}px;top:{-by0 * dhi:.2f}px;width:{dwi:.2f}px;height:{dhi:.2f}px">')
+            else:
+                piece = im.convert("RGB").crop((int(bx0 * iw), int(by0 * ih), int(bx1 * iw), int(by1 * ih)))
+                content = f'<img src="{P.asset(piece, f"pop_{i}_{k}")}">'
             px0, py0 = ox + bx0 * dwi, oy + by0 * dhi
             pw_, ph_ = (bx1 - bx0) * dwi, (by1 - by0) * dhi
             rr = float(pd.get("radius", 0.04 * min(bx1 - bx0, by1 - by0))) * dwi
@@ -648,7 +708,7 @@ def w_gallery(sc, P, i):
             direction = 1 if (bx0 + bx1) / 2 >= 0.5 else -1
             sc_ = float(pd.get("scale", 1.0))
             pops.append(f'<div class="pop" id="{_sid(i, f"p{k}")}" style="left:{sx + px0:.1f}px;top:{sy + py0:.1f}px;width:{pw_:.1f}px;'
-                        f'height:{ph_:.1f}px;border-radius:{rr:.1f}px"><img src="{purl}"></div>')
+                        f'height:{ph_:.1f}px;border-radius:{rr:.1f}px">{content}</div>')
             scr.append(f'<div class="slot" id="{_sid(i, f"q{k}")}" style="left:{px0:.1f}px;top:{py0:.1f}px;width:{pw_:.1f}px;'
                        f'height:{ph_:.1f}px;border-radius:{rr:.1f}px"></div>')
             out_x = min(W * 0.16, (W - dw_) / 2 + pw_ * 0.25) if kind == "phone" else W * 0.05
@@ -667,7 +727,8 @@ def w_gallery(sc, P, i):
             dx = (pc - W / 2) / f - cx0 + W / 2
             pop = {"at": at, "back": back, "x": dx, "z": pz,
                    "y": py_, "ry": -direction * 14, "s": sc_, "dir": direction}
-        js_items.append({"s": starts[k], "e": ends[k], "scroll": scroll, "pop": pop})
+        js_items.append({"s": starts[k], "e": ends[k], "scroll": scroll, "pop": pop, "motion": motion})
+        im.close()
     scr.append(island + '<div class="glare"></div></div>')
     deck = ""
     if kind != "phone":
@@ -731,6 +792,16 @@ def w_gallery(sc, P, i):
       pp.style.transform = `translate3d(${{P_.x * e}}px, ${{P_.y * e}}px, ${{P_.z * e}}px) rotateY(${{P_.ry * e}}deg) rotateX(${{6 * e}}deg) scale(${{1 + (P_.s - 1 + 0.05) * e}})`;
       pp.style.boxShadow = `0 ${{(30 + 80 * ea) * U}}px ${{(50 + 100 * ea) * U}}px rgba(0,0,0,${{0.12 + 0.48 * ea}}), 0 0 0 1px rgba(255,255,255,${{0.1 * ea}})`;
       sl.style.opacity = 0.55 * ea;
+    }}
+    if (it.motion && el.style.display !== 'none') {{
+      im.style.transform = 'none';
+      const frame = clamp(1 + Math.floor((t - it.s) * it.motion.fps + 0.001), 1, it.motion.count);
+      const url = it.motion.base + String(frame).padStart(6, '0') + '.jpg';
+      const detail = P_ && $('{_sid(i, 'p')}' + k).style.opacity !== '0' ? $('{_sid(i, 'pi')}' + k) : null;
+      for (const img of detail ? [im, detail] : [im]) {{
+        if (img.getAttribute('src') !== url) img.src = url;
+        window.__galleryImages.push(img);
+      }}
     }}
   }}
   const cc = $('{_sid(i, 'cc')}');
@@ -949,15 +1020,116 @@ def w_counter(sc, P, i):
     return {"html": html, "js": js, "sfx": [(0.05, "whoosh", 0.35), (0.15 + cd * 0.85, "ding", 0.6)]}
 
 
-BUILDERS = {"kinetic": w_kinetic, "title": w_title, "contrast": w_contrast, "gallery": w_gallery, "wall": w_wall,
+# The same seekable camera track drives stills, motion-blur subframes, previews and full renders.
+STAGE_CSS = r"""
+.stage-view { position:absolute; direction:ltr; perspective:calc(var(--unit) * 1.75); }
+.stage-rig { position:absolute; inset:0; transform-style:preserve-3d; }
+.stage-part { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; }
+.stage-rim, .stage-back { position:absolute; left:11%; top:16%; width:78%; height:68%; box-sizing:border-box; border-radius:9% / 11%; }
+.stage-rim {
+  border:calc(var(--unit) * .014) solid color-mix(in srgb,var(--primary) 30%,#788491);
+  border-top-color:color-mix(in srgb,var(--primary) 19%,white); border-left-color:#a1a8ad;
+  border-bottom-color:#424b56;
+  box-shadow:inset 0 0 0 calc(var(--unit) * .004) #14191a,0 0 0 calc(var(--unit) * .003) #14191a,
+             0 0 0 calc(var(--unit) * .005) color-mix(in srgb,var(--primary) 65%,#eee);
+}
+.stage-rim::after { content:""; position:absolute; inset:-1.5%; border-radius:inherit; border-top:1px solid #fff9; }
+.stage-back {
+  background:radial-gradient(ellipse at 38% 24%,color-mix(in srgb,var(--primary) 16%,#14171e),#101217 72%);
+  border:1px solid #777b80; box-shadow:0 calc(var(--unit) * .035) calc(var(--unit) * .065) #0006;
+}
+.stage-orbit .stage-rim { inset:6% -4%; width:108%; height:88%; border-radius:50%; border-width:calc(var(--unit) * .003);
+  box-shadow:0 0 calc(var(--unit) * .012) color-mix(in srgb,var(--primary) 24%,transparent); }
+.stage-explode .stage-rim { border-width:calc(var(--unit) * .003); border-style:dashed; box-shadow:none; opacity:.53; }
+.stage-orbit .stage-rim::after, .stage-explode .stage-rim::after { display:none; }
+.stage-gate { position:absolute; inset:9% 5%; border-radius:12% / 16%; box-sizing:border-box;
+  border:calc(var(--unit) * .012) solid color-mix(in srgb,var(--primary2) 52%,#929ba5);
+  border-left-color:var(--primary); border-top-color:color-mix(in srgb,var(--primary) 65%,#fff);
+  box-shadow:0 0 calc(var(--unit) * .012) color-mix(in srgb,var(--primary) 45%,transparent),inset 0 0 0 calc(var(--unit) * .004) #1118; }
+.stage-shadow { position:absolute; top:82%; left:16%; width:68%; height:14%; border-radius:50%;
+  background:radial-gradient(ellipse closest-side,#0009,transparent); }
+.stage-copy { position:absolute; text-align:center; transform:translate(-50%,-50%); color:var(--text); }
+.stage-copy .stage-title { white-space:nowrap; line-height:1.18; font-weight:900; }
+.stage-copy .stage-sub { white-space:nowrap; line-height:1.25; color:var(--muted); margin-top:.24em; }
+"""
+
+
+def w_stage3d(sc, P, i):
+    """Perspective product stage with an actual depth-sorted rim and independent image planes."""
+    mode = sc.get("mode", "breakout")
+    intensity = sc.get("intensity", 2)
+    cx, cy, size, tx, ty, text_width = pe.stage_geometry(P.ctx)
+    scene_id = _sid(i, "stage")
+    if sc.get("layers"):
+        urls = [P.src(layer["src"]) for layer in sc["layers"]]
+    else:
+        # Slight supersampling keeps highlights smooth when a ring crosses the aperture.
+        art = pe.stage_sculpture(P.ctx, min(1000, max(48, int(size * 1.5))))
+        urls = [P.asset(im, f"stage-{i}-part-{j}") for j, im in enumerate(art)]
+    planes = "".join(f'<img class="stage-part" src="{_html.escape(url, quote=True)}" alt="">' for url in urls)
+    # The backplate sits behind even the anticipation pose; only the narrow lip intersects the product.
+    furniture = ('<div class="stage-back" style="transform:translateZ(calc(var(--unit) * -.65))"></div>'
+                 if mode == "breakout" else "")
+    if mode == "tunnel":
+        furniture += '<div class="stage-gate"></div>' * 5
+    else:
+        furniture += '<div class="stage-rim"></div>'
+    view = (f'<div class="stage-view stage-{mode}" id="{scene_id}" style="--unit:{size:.2f}px;'
+            f'left:{cx - size / 2:.2f}px;top:{cy - size / 2:.2f}px;width:{size:.2f}px;height:{size:.2f}px">'
+            f'<div class="stage-shadow"></div><div class="stage-rig">{furniture}{planes}</div></div>')
+    copy = []
+    for key, role, nominal, cls in (("title", "display", 84, "stage-title"), ("subtitle", "body", 38, "stage-sub")):
+        if not sc.get(key):
+            continue
+        font = P.ctx.font(role, nominal)
+        width = max(1, font.getlength(sc[key]))
+        fs = nominal * P.U * min(1, text_width * .93 / width)
+        copy.append(f'<div class="f-{role} txt fit {cls}" dir="auto" data-maxw="{text_width:.2f}" '
+                    f'style="font-size:{fs:.2f}px">{esc(sc[key])}</div>')
+    text_block = (f'<div class="stage-copy" style="left:{tx:.2f}px;top:{ty:.2f}px;width:{text_width:.2f}px">'
+                  f'{"".join(copy)}</div>')
+    # Small normalized track shared with the classic renderer; interpolation handles arbitrarily high frame rates.
+    track = [[round(v, 5) for v in pe.stage_pose(mode, intensity, n / 64)] for n in range(65)]
+    js = """(() => {
+      const root = $(ID), rig = root.querySelector('.stage-rig'), shadow = root.querySelector('.stage-shadow');
+      const parts = [...rig.querySelectorAll('.stage-part')], gates = [...rig.querySelectorAll('.stage-gate')];
+      const unit = UNIT, track = TRACK, mode = MODE;
+      return (t, d) => {
+        const p = clamp(t / d), pos = p * (track.length - 1), j = Math.min(track.length - 2, Math.floor(pos));
+        const [yaw,pitch,roll,z,spread] = track[j].map((v,k) => lerp(v,track[j+1][k],pos-j));
+        rig.style.transform = `rotateZ(${roll}deg) rotateX(${pitch}deg) rotateY(${yaw}deg)`;
+        const rim = rig.querySelector('.stage-rim');
+        if (rim && mode === 'orbit') rim.style.transform = `rotateX(${57 + 9*p}deg) rotateZ(${-22 + 44*p}deg)`;
+        parts.forEach((part,k) => {
+          const depth = parts.length > 1 ? k / (parts.length - 1) - .5 : 0;
+          const separation = spread * depth;
+          part.style.transform = `translate3d(${unit*separation*.12}px,${-unit*separation*.16}px,${unit*(z+separation)}px)`;
+          const lift = clamp((z+separation+.28)*1.5);
+          const dx = (-.005 - .019*lift - yaw*.00019)*unit, dy = (.013 + lift*.022)*unit;
+          part.style.filter = `drop-shadow(${dx}px ${dy}px ${(.0035+.009*lift)*unit}px rgba(3,5,8,.43))`;
+        });
+        gates.forEach((gate,k) => {
+          const gz = .55 - k*.72 + 1.75*p;
+          // Fade a gate as it goes around the lens; don't let it reappear behind the camera.
+          gate.style.opacity = clamp((1.42-gz)/.54) * clamp((gz+3)/.8) * .88;
+          gate.style.transform = `translateZ(${Math.min(gz,1.43)*unit}px) rotateZ(${(k-2)*5}deg)`;
+        });
+        shadow.style.transform = `translateX(${yaw*.0006*unit}px) scale(${1.12 - clamp(z+.3)*.33})`;
+        shadow.style.opacity = .9 - clamp(z+.3)*.4;
+      };
+    })()""".replace("ID", json.dumps(scene_id)).replace("UNIT", f"{size:.3f}").replace("TRACK", json.dumps(track)).replace("MODE", json.dumps(mode))
+    return {"html": view + text_block, "js": js, "sfx": pe.stage_sfx(mode, sc["_dur"])}
+
+
+BUILDERS = {"stage3d": w_stage3d, "kinetic": w_kinetic, "title": w_title, "contrast": w_contrast, "gallery": w_gallery, "wall": w_wall,
             "bundle": w_bundle, "cta": w_cta, "logo": w_logo, "counter": w_counter, "stat": w_counter, "stats": w_counter}
 
 
 # ----------------------------------------------------------------- page
 def build_page(scenes, brief, ctx, wd):
     P_ = P(ctx, wd)
-    css = "\n".join([fonts_css(ctx), root_css(P_), BASE_CSS.replace("__W__", str(P_.W)).replace("__H__", str(P_.H))
-                     .replace("__GRAIN__", grain_png(P_)), SCENE_CSS])
+    css = "\n".join([fonts_css(P_), root_css(P_), BASE_CSS.replace("__W__", str(P_.W)).replace("__H__", str(P_.H))
+                     .replace("__GRAIN__", grain_png(P_)), SCENE_CSS, STAGE_CSS])
     bg_html, bg_js = bg_layer(P_)
     layers, defs = [], []
     for i, sc in enumerate(scenes):
@@ -996,10 +1168,11 @@ window.seek(0);
     path = os.path.join(wd, "web", "index.html")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     open(path, "w", encoding="utf-8").write(page)
+    Path(path).with_suffix(".assets.json").write_text(json.dumps(P_.media_paths), encoding="utf-8")
     return path
 
 
-CHROME_ARGS = ["--no-sandbox", "--allow-file-access-from-files", "--disable-background-networking", "--disable-component-update",
+CHROME_ARGS = ["--no-sandbox", "--disable-background-networking", "--disable-component-update",
                "--disable-sync", "--no-first-run", "--disable-default-apps", "--metrics-recording-only", "--mute-audio",
                "--font-render-hinting=none", "--force-color-profile=srgb", "--hide-scrollbars"]
 
@@ -1012,15 +1185,31 @@ class Page:
         self.pw = sync_playwright().start()
         exe = find_chrome()
         self.br = self.pw.chromium.launch(executable_path=exe, args=CHROME_ARGS) if exe else self.pw.chromium.launch(args=CHROME_ARGS)
-        self.pg = self.br.new_page(viewport={"width": W, "height": H}, device_scale_factor=1)
-        self.pg.goto("file://" + os.path.abspath(html))
+        self.pg = self.br.new_page(viewport={"width": W, "height": H}, device_scale_factor=1, service_workers="block")
+        entry = RENDER_ORIGIN + "/index.html"
+        paths = json.loads(Path(html).with_suffix(".assets.json").read_text(encoding="utf-8"))
+        paths[entry] = str(Path(html).resolve())
+
+        def serve(route):
+            path = paths.get(route.request.url)
+            if path and route.request.method == "GET" and os.path.isfile(path):
+                route.fulfill(path=path)
+            else:
+                route.abort("blockedbyclient")
+
+        # Serve just this render's registered files in-process. No web server or file:// access is required.
+        self.pg.context.route("**/*", serve)
+        self.pg.goto(entry)
         self.pg.evaluate("document.fonts.ready")
         self.pg.wait_for_load_state("networkidle")
         self.pg.evaluate("Promise.all([...document.images].map(i => i.decode().catch(() => 0)))")
         self.pg.evaluate("window.__fit()")
 
     def grab(self, t, png=False):
-        self.pg.evaluate(f"window.seek({t:.5f})")
+        self.pg.evaluate("""t => {
+          window.seek(t);
+          if (window.__galleryImages.length) return Promise.all(window.__galleryImages.map(im => im.decode()));
+        }""", round(t, 5))
         b = self.pg.screenshot(type="png") if png else self.pg.screenshot(type="jpeg", quality=93)
         return np.asarray(Image.open(io.BytesIO(b)).convert("RGB"))
 
@@ -1101,20 +1290,15 @@ def browser_problem():
     return None
 
 
-def classic(brief_path, out, fmt, draft, workers, preview, frame_at, workdir, creative, do_qa, plan, why):
+def classic(brief_path, out, fmt, draft, workers, preview, frame_at, workdir, creative, do_qa, plan, why, brief):
     """Render with the classic engine in its premium style (closest look to the web renderer)."""
     if why:
         pe.log(f"[web] {why} - rendering with the classic renderer (premium style)")
-    b = json.load(open(brief_path, encoding="utf-8"))
-    b.pop("renderer", None)
-    b.setdefault("fx", {"style": "premium"})
-    tmp = os.path.join(os.path.dirname(os.path.abspath(brief_path)), "." + os.path.basename(brief_path) + ".classic.json")
-    json.dump(b, open(tmp, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
-    try:
-        return pe.run(tmp, out, fmt, draft, workers, preview, frame_at, workdir, creative=creative, do_qa=do_qa, plan=plan)
-    finally:
-        if os.path.exists(tmp):
-            os.remove(tmp)
+    fallback = dict(brief)
+    fallback.pop("renderer", None)
+    fallback.setdefault("fx", {"style": "premium"})
+    return pe.run(brief_path, out, fmt, draft, workers, preview, frame_at, workdir, creative=creative,
+                  do_qa=do_qa, plan=plan, brief=fallback)
 
 
 def unsupported(brief):
@@ -1122,21 +1306,23 @@ def unsupported(brief):
 
 
 def run_web(brief_path, out, fmt, draft, workers, preview, frame_at, workdir=None, creative=None, do_qa=True, plan=False,
-            samples=None):
+            samples=None, brief=None):
     t_start = time.time()
     brief_path = os.path.abspath(brief_path)
-    brief = pe.load_brief(brief_path)
+    if brief is None:
+        brief = pe.load_brief(brief_path)
     base_dir = os.path.dirname(os.path.abspath(brief_path))
     os.chdir(base_dir)
     bad = unsupported(brief)
     if bad:
         return classic(brief_path, out, fmt, draft, workers, preview, frame_at, workdir, creative, do_qa, plan,
-                       f"the web renderer does not support scene types {', '.join(bad)} yet")
+                       f"the web renderer does not support scene types {', '.join(bad)} yet", brief)
     if plan:
-        return pe.run(brief_path, out, fmt, draft, workers, preview, frame_at, workdir, creative=creative, do_qa=do_qa, plan=True)
+        return pe.run(brief_path, out, fmt, draft, workers, preview, frame_at, workdir, creative=creative,
+                      do_qa=do_qa, plan=True, brief=brief)
     prob = browser_problem()
     if prob:
-        return classic(brief_path, out, fmt, draft, workers, preview, frame_at, workdir, creative, do_qa, plan, prob)
+        return classic(brief_path, out, fmt, draft, workers, preview, frame_at, workdir, creative, do_qa, plan, prob, brief)
     errs, warns = pe.validate(brief)
     for w_ in warns:
         pe.log("[warn] " + w_)
@@ -1195,7 +1381,7 @@ def run_web(brief_path, out, fmt, draft, workers, preview, frame_at, workdir=Non
     pe.build_audio(brief, scenes, ctx, wav)
     tmp = stem + ".tmp.mp4"
     subprocess.run([pe.FFMPEG, "-y", "-v", "error", "-i", vid, "-i", wav, "-map", "0:v", "-map", "1:a", "-c:v", "copy",
-                    "-af", "loudnorm=I=-14:TP=-1.5:LRA=11", "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
+                    "-af", pe.MASTER_AUDIO_FILTER, "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
                     "-shortest", "-movflags", "+faststart", tmp], check=True)
     os.replace(tmp, out)
     if brief.get("music_free_version"):
@@ -1220,8 +1406,7 @@ def run_web(brief_path, out, fmt, draft, workers, preview, frame_at, workdir=Non
     print(out)
     rep = None
     if do_qa and brief.get("qa", True):
-        pe.layout_issues = lambda sc_, cx_: (errs_l, warns_l)
-        rep = pe.qa(out, brief, scenes, ctx, creative, stem)
+        rep = pe.qa(out, brief, scenes, ctx, creative, stem, layout=(errs_l, warns_l))
         pe.log(f"[qa] automatic {rep['auto_points']}/75" + (f", total {rep['score']}/100" if rep.get("score") is not None else
                                                              " (creative review pending)") +
                f", {len(rep['errors'])} errors, {len(rep['warnings'])} warnings -> {stem}_qa.md")

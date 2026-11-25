@@ -5,15 +5,17 @@ Usage:
                           [--preview] [--frame SECONDS] [--draft] [--workers N]
 Needs: python3, numpy, Pillow (with raqm for RTL; else pip install python-bidi), ffmpeg.
 """
-import argparse, glob, hashlib, json, math, os, re, shutil, subprocess, sys, time, wave
+import argparse, copy, glob, hashlib, json, math, os, re, shutil, subprocess, sys, time, wave
 from concurrent.futures import ProcessPoolExecutor
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, features
 
-VERSION = "4.1.1"
+VERSION = "5.0.0"
 SEED_SALT = "3.0.0"  # frozen: keeps random choices stable across engine versions
 FFMPEG = shutil.which("ffmpeg") or "ffmpeg"
 SR = 48000
+# Leave headroom for transients after AAC encoding at the delivery sample rate.
+MASTER_AUDIO_FILTER = "loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000,alimiter=limit=0.75:level=0:latency=1"
 RAQM = features.check("raqm")
 if not RAQM:
     try:
@@ -70,6 +72,32 @@ PLATFORMS = {"reels": ("9x16", "reels", (15, 30)), "tiktok": ("9x16", "tiktok", 
              "shorts": ("9x16", "reels", (15, 45)), "stories": ("9x16", "reels", (5, 15)),
              "ads": ("9x16", "ads", (6, 30)), "feed": ("4x5", "full", (10, 30)), "square": ("1x1", "full", (10, 30)),
              "youtube": ("16x9", "full", (30, 120)), "promo": ("16x9", "full", (30, 90))}
+DIRECTIONS = {
+    "cinematic": {
+        "description": "Warm gold, elegant type, a breakout reveal and a slow orbit.",
+        "theme": {"preset": "gold", "type": "elegant", "grade": "warm", "bg_style": "tech"},
+        "fx": {"style": "premium"}, "modes": ("breakout", "orbit"), "intensity": 2,
+        "shot": 2.8, "stage": 3.8, "gallery_per": 1.6, "transitions": ("fade", "push"),
+    },
+    "editorial": {
+        "description": "Paper and blue, condensed headings, a side-on orbit and precise cuts.",
+        "theme": {"preset": "clean", "type": "condensed", "grade": "natural", "bg_style": "grid"},
+        "fx": {"energy": 0}, "modes": ("orbit", "explode"), "intensity": 1,
+        "shot": 2.2, "stage": 2.5, "gallery_per": 1.05, "transitions": ("cut", "push", "cut"),
+    },
+    "arcade": {
+        "description": "Neon orange and violet, short hits, a tunnel fly-through and a punch out.",
+        "theme": {"preset": "neon", "type": "bold", "grade": "punchy", "bg_style": "tech"},
+        "fx": {"style": "hype", "energy": 2}, "modes": ("tunnel", "breakout"), "intensity": 3,
+        "shot": 1.6, "stage": 1.9, "gallery_per": 0.68, "transitions": ("zoom_through", "diamond", "cut"),
+    },
+    "showroom": {
+        "description": "Cool cyan, technical type, an exploded product view and a measured orbit.",
+        "theme": {"preset": "tech", "type": "tech", "grade": "cool", "bg_style": "tech"},
+        "fx": {"style": "premium"}, "modes": ("explode", "orbit"), "intensity": 1,
+        "shot": 2.6, "stage": 3.4, "gallery_per": 1.4, "transitions": ("push", "fade"),
+    },
+}
 FONT_DIR = os.path.expanduser("~/.cache/promo_fonts")
 PHOTO_EXT = (".jpg", ".jpeg", ".png", ".webp", ".bmp")
 
@@ -3397,15 +3425,149 @@ def b_bundle(sc, ctx):
     return bg, els, sfx
 
 
-BUILDERS = {"hook": b_hook, "stamp": b_stamp, "logo": b_logo, "title": b_title, "collage": b_collage,
+# stage3d uses one normalized camera track for both the CSS stage and the classic fallback.
+STAGE_MODES = ("breakout", "orbit", "explode", "tunnel")
+
+
+def stage_geometry(ctx):
+    """Side-by-side on wide screens, stacked on phones. Units are relative to the safe band."""
+    band = ctx.bot - ctx.top
+    if ctx.land:
+        return (ctx.W * .34, ctx.cy, min(ctx.W * .40, band * .76),
+                ctx.W * .76, ctx.cy, ctx.W * .37)
+    return (ctx.W * .50, ctx.top + band * .38, min(ctx.W * .71, band * .55),
+            ctx.W * .50, ctx.top + band * .83, ctx.W * .86)
+
+
+def stage_pose(mode, intensity, p):
+    """Yaw, pitch, roll in degrees, then hero depth and layer separation as fractions of stage size."""
+    p = clamp(p)
+    amp = .7 + .15 * intensity
+    def ease(start, end):
+        return .5 - .5 * math.cos(math.pi * clamp((p - start) / (end - start)))
+    if mode == "orbit":
+        arc = (1 - 2 * p) * math.pi * .5
+        return (45 * amp * math.sin(arc), -9 + 7 * p, -5 + 10 * p, .09, .17 * amp)
+    if mode == "explode":
+        lift = ease(.06, .42) - ease(.70, .97)
+        return (-12 - 23 * lift * amp, 3 + 12 * lift, 4 * lift, .025, (.015 + .77 * lift) * amp)
+    if mode == "tunnel":
+        fly = ease(.02, .82)
+        return (15 - 24 * fly, -6 + 9 * fly, 10 * (1 - fly), -.93 + 1.12 * fly, .025)
+    launch = ease(.19, .45)
+    settle = ease(.45, .70)
+    z = -.32 - .12 * ease(0, .18) + .97 * launch - .20 * settle
+    return (-22 + 38 * launch - 7 * settle, 9 - 18 * launch + 4 * settle,
+            -7 + 11 * launch - 2 * settle, z * amp, .025 + .04 * (launch - settle))
+
+
+def stage_sfx(mode, dur):
+    cues = {"breakout": [(.19, "whoosh", .45), (.42, "impact", .7)],
+            "orbit": [(.18, "whoosh", .35)],
+            "explode": [(.12, "click", .45), (.34, "whoosh", .4), (.91, "click", .65)],
+            "tunnel": [(.14, "whoosh", .5), (.62, "whoosh", .4), (.79, "reveal", .5)]}
+    return [(frac * dur, name, gain) for frac, name, gain in cues[mode]]
+
+
+def stage_sculpture(ctx, size):
+    """Ray-shaded metal ring sections on matching transparent canvases, for graphic-only briefs."""
+    cache = getattr(ctx, "_stage_sculptures", {})
+    if size in cache:
+        return cache[size]
+    axis = (np.arange(size, dtype=np.float32) + .5) / size - .5
+    x, y = np.meshgrid(axis, axis)
+    r, theta = np.hypot(x, y), np.arctan2(y, x)
+    primary = np.array(ctx.c["primary"], np.float32)
+    secondary = np.array(ctx.c["primary2"], np.float32)
+    art = []
+    # A rounded triangular outline, a chromed interior and a coloured rim. The highlights
+    # follow the curved surface and transparent inner/outer edges survive the depth transforms.
+    for major, tube, phase, tint in ((.34, .073, .55, secondary), (.21, .058, -.1, primary), (.31, .063, -.46, primary)):
+        shape = 3 * theta + phase
+        d = (r - major - .052 * np.cos(shape)) / tube
+        nz = np.sqrt(np.maximum(0, 1 - np.clip(d, -1, 1) ** 2))
+        turn = .156 * np.sin(shape) / np.maximum(.1, r)
+        nx = d * (np.cos(theta) - turn * np.sin(theta))
+        ny = d * (np.sin(theta) + turn * np.cos(theta))
+        length = np.sqrt(nx * nx + ny * ny + nz * nz).clip(.01)
+        nx, ny, nz = nx / length, ny / length, nz / length
+        reflection = 2 * nz * (-.65 * nx - .75 * ny)
+        studio = .20 + .60 * np.clip(-nx * .35 - ny * .45 + nz * .4, 0, 1)
+        shine = .86 * np.exp(-((reflection - .35) / .13) ** 2) + .46 * np.exp(-((reflection + .60) / .09) ** 2)
+        rgb = tint * studio[..., None] + (250 - tint * .3) * shine[..., None]
+        alpha = np.clip((1 - np.abs(d)) * size * tube + .5, 0, 1) * 255
+        art.append(Image.fromarray(np.dstack((np.clip(rgb, 0, 255), alpha)).astype(np.uint8), "RGBA"))
+    cache[size] = art
+    ctx._stage_sculptures = cache
+    return art
+
+
+def b_stage3d(sc, ctx):
+    """Classic fallback: project the art planes, frame and titles without a browser."""
+    cx, cy, size, tx, ty, text_width = stage_geometry(ctx)
+    n = max(4, round(size))
+    mode, strength = sc.get("mode", "breakout"), sc.get("intensity", 2)
+    duration = sc.get("_dur", sc.get("dur", 3.0))
+    layers = []
+    for layer in sc.get("layers", []):
+        with Image.open(layer["src"]) as original:
+            im = original.convert("RGBA")
+        im.thumbnail((n, n), Image.LANCZOS)
+        canvas = Image.new("RGBA", (n, n))
+        canvas.alpha_composite(im, ((n - im.width) // 2, (n - im.height) // 2))
+        layers.append(canvas)
+    if not layers:
+        layers = stage_sculpture(ctx, n)
+    rim = Image.new("RGBA", (n, n))
+    pen = ImageDraw.Draw(rim)
+    rect = (n * .13, n * .18, n * .87, n * .82)
+    if mode == "orbit":
+        pen.ellipse((n * .05, n * .17, n * .95, n * .83), outline=ctx.c["primary"] + (145,), width=max(1, int(.005 * n)))
+    else:
+        pen.rounded_rectangle(rect, radius=n * .055, outline=ctx.c["muted"] + (165,), width=max(2, int(n * .012)))
+        pen.rounded_rectangle(rect, radius=n * .055, outline=ctx.c["primary"] + (255,), width=max(1, int(n * .004)))
+    def draw(out, t, bgf):
+        p = clamp(t / duration)
+        yaw, pitch, roll, z, spread = stage_pose(mode, strength, p)
+        yaw_r, pitch_r = math.radians(yaw), math.radians(pitch)
+        planes = []
+        for j, im in enumerate(layers):
+            depth = j / max(1, len(layers) - 1) - .5 if len(layers) > 1 else 0
+            planes.append((z + depth * spread, depth * spread, im))
+        if mode == "tunnel":
+            # The far aperture recedes as each near gate passes outside the stage.
+            for k in range(5):
+                gate_z = .55 - k * .72 + 1.75 * p
+                if gate_z < 1.05:
+                    planes.append((gate_z, 0, rim))
+        else:
+            planes.append((0, 0, rim))
+        for depth, separation, sprite in sorted(planes, key=lambda el: el[0]):
+            scale = 1.75 / (1.75 - depth)
+            x = (depth * math.sin(yaw_r) + separation * .12) * size * scale
+            y = (-depth * math.sin(pitch_r) - separation * .16) * size * scale
+            render_size = max(2, round(n * scale))
+            im = sprite.resize((render_size, render_size), Image.BILINEAR)
+            im = tilt(im, yaw, pitch)
+            if abs(roll) > .2:
+                im = im.rotate(-roll, Image.BILINEAR, expand=True)
+            over(out, np.asarray(im), cx + x - im.width / 2, cy + y - im.height / 2)
+    title = ctx.T(sc["title"], "display", 84, max_w=text_width)
+    sub = ctx.T(sc["subtitle"], "body", 38, color=ctx.c["muted"], max_w=text_width) if sc.get("subtitle") else None
+    lines = stack([title, sub], ty, (ctx.bot - ctx.top) * .25, [-22 * ctx.U])
+    elements = [Fn(draw)] + [Sprite(im, tx, y, 0, "none") for im, y in lines]
+    return {"kind": "panel"}, elements, stage_sfx(mode, duration)
+
+
+BUILDERS = {"stage3d": b_stage3d, "hook": b_hook, "stamp": b_stamp, "logo": b_logo, "title": b_title, "collage": b_collage,
             "showcase": b_showcase, "features": b_features, "location": b_location,
             "kinetic": b_kinetic, "cards": b_cards, "steps": b_steps, "device": b_device,
             "contrast": b_contrast, "gallery": b_gallery, "wall": b_wall, "bundle": b_bundle,
             "counter": b_counter, "checklist": b_checklist, "testimonial": b_testimonial,
             "before_after": b_before_after, "offer": b_offer, "text": b_text, "cta": b_cta}
-DEFAULT_DUR = {"kinetic": 2.2, "device": 3.0, "showcase": 2.0, "location": 2.6, "hook": 2.2, "stamp": 1.9, "logo": 2.5, "title": 1.3, "collage": 2.4, "counter": 2.0,
+DEFAULT_DUR = {"stage3d": 3.0, "kinetic": 2.2, "device": 3.0, "showcase": 2.0, "location": 2.6, "hook": 2.2, "stamp": 1.9, "logo": 2.5, "title": 1.3, "collage": 2.4, "counter": 2.0,
                "testimonial": 4.2, "before_after": 3.6, "offer": 2.8, "text": 2.0, "cta": 5.0}
-DEFAULT_TRANS = {"kinetic": "blur", "cards": "zoom", "steps": "slide_up", "device": "zoom",
+DEFAULT_TRANS = {"stage3d": "cut", "kinetic": "blur", "cards": "zoom", "steps": "slide_up", "device": "zoom",
                  "contrast": "blur", "gallery": "zoom", "wall": "blur", "bundle": "slide_up",
                  "showcase": "slide", "features": "zoom", "location": "zoom", "hook": "cut", "stamp": "glitch", "logo": "zoom", "title": "whip", "collage": "zoom",
                  "counter": "slide_up", "checklist": "zoom", "testimonial": "fade", "before_after": "whip",
@@ -3419,7 +3581,7 @@ TRANS_LEN = {"flash": 6, "zoom": 9, "whip": 9, "slide": 9, "slide_up": 9, "glitc
 # transitions rotated through automatically when fx energy >= 2 (scenes without their own transition)
 CRAZY_TRANS = ["cube", "zoom_blur", "slices", "spin", "shape", "whip", "diamond", "glitch"]
 # premium style: one consistent family, chosen by what the next scene is (scenes without their own transition)
-PREMIUM_TRANS = {"gallery": "zoom_through", "wall": "zoom_through", "cta": "zoom_through", "logo": "zoom_through",
+PREMIUM_TRANS = {"stage3d": "cut", "gallery": "zoom_through", "wall": "zoom_through", "cta": "zoom_through", "logo": "zoom_through",
                  "bundle": "cube", "cards": "cube", "device": "cube"}
 
 
@@ -3889,6 +4051,8 @@ def make_plan(brief, ctx, workdir):
         media = [sc.get("image")] + list(sc.get("images") or []) + \
                 [(it.get("src") or it.get("image")) for it in (sc.get("items") or []) if isinstance(it, dict)]
         srcs += [norm_clip(x)["src"] if isinstance(x, dict) else x for x in media if isinstance(x, (str, dict)) and x]
+        if sc["type"] == "stage3d":
+            srcs.extend(layer["src"] for layer in sc.get("layers", []))
         stamp = [(f, os.path.getmtime(f), os.path.getsize(f)) for f in srcs if f and os.path.exists(f)]
         caps = [c for c in ctx.captions if c["s"] < sc["_t0"] + sc["_dur"] and c["e"] > sc["_t0"]]
         def key_for(ver, prev):
@@ -4710,15 +4874,50 @@ def draw_captions(out, T, ctx):
 
 # ----------------------------------------------------------------- v3: brief loading, validation, recovery
 KNOWN_TYPES = set(BUILDERS) | {"services", "stats"}
-REQUIRED = {"hook": ["big"], "stamp": ["stamp"], "kinetic": ["lines"], "cards": ["items"], "steps": ["items"],
+REQUIRED = {"stage3d": ["title"], "hook": ["big"], "stamp": ["stamp"], "kinetic": ["lines"], "cards": ["items"], "steps": ["items"],
             "features": ["items"], "checklist": ["items"], "services": ["items"], "stats": ["items"],
             "before_after": ["before", "after"], "collage": [], "counter": ["value"],
             "contrast": ["items"], "gallery": ["items"], "wall": ["images"], "bundle": ["items"]}
 
 
-def load_brief(path):
-    """Read a brief and apply its brand kit (brand_kit: kit.json from --brand-from) and platform defaults."""
-    brief = json.load(open(path, encoding="utf-8"))
+def apply_direction(brief, name):
+    """Fill unspecified creative choices. Author and brand-kit settings take precedence."""
+    if not isinstance(name, str) or name not in DIRECTIONS:
+        raise SystemExit(f"[error] unknown direction {name!r}. Choose from {', '.join(DIRECTIONS)}.")
+    style = DIRECTIONS[name]
+    brief["direction"] = name
+    brief["theme"] = {**style["theme"], **brief.get("theme", {})}
+    brief.setdefault("fx", dict(style["fx"]))
+    stage_index = 0
+    for i, scene in enumerate(brief.get("scenes") or []):
+        kind = scene.get("type")
+        if i:
+            scene.setdefault("transition", style["transitions"][(i - 1) % len(style["transitions"])])
+        if kind == "stage3d":
+            scene.setdefault("mode", style["modes"][stage_index % len(style["modes"])])
+            stage_index += 1
+            scene.setdefault("intensity", style["intensity"])
+            if "beats" not in scene:
+                scene.setdefault("dur", style["stage"] if i else style["shot"])
+        elif kind in ("hook", "kinetic", "title", "showcase") and "beats" not in scene:
+            scene.setdefault("dur", style["shot"])
+        elif kind == "gallery":
+            scene.setdefault("per", style["gallery_per"])
+
+
+def load_brief(path, *, direction=None, variant=None, raw=None):
+    """Resolve a brief relative to its own path. A variant's scene overrides precede direction defaults."""
+    if raw is None:
+        with open(path, encoding="utf-8") as f:
+            brief = json.load(f)
+    else:
+        brief = copy.deepcopy(raw)
+    if variant is not None:
+        selected = next((v for v in brief.get("variants", []) if v.get("name") == variant), None)
+        if selected is None:
+            raise SystemExit(f"[error] brief has no variant named {variant!r}")
+        for idx, overrides in selected.get("scenes", {}).items():
+            brief["scenes"][int(idx)].update(overrides)
     base = os.path.dirname(os.path.abspath(path))
     kit_p = brief.get("brand_kit")
     if kit_p:
@@ -4736,6 +4935,11 @@ def load_brief(path):
     plat = PLATFORMS.get(brief.get("platform", ""))
     if plat and "format" not in brief:
         brief["format"] = plat[0]
+    selected_direction = direction if direction is not None else brief.get("direction")
+    if selected_direction is not None:
+        apply_direction(brief, selected_direction)
+    if any(scene.get("type") == "stage3d" for scene in brief.get("scenes") or []):
+        brief.setdefault("renderer", "web")
     return brief
 
 
@@ -4768,6 +4972,33 @@ def validate(brief):
             if len(ok) < len(sc["clips"]):
                 warns.append(f"scene {i} ({t}): {len(sc['clips']) - len(ok)} collage clip(s) missing - skipped")
             sc["clips"] = ok
+        if t == "stage3d":
+            where = f"scene {i} (stage3d)"
+            if sc.get("mode", "breakout") not in STAGE_MODES:
+                errs.append(f"{where}: mode must be one of {', '.join(STAGE_MODES)}")
+            if type(sc.get("intensity", 2)) is not int or sc.get("intensity", 2) not in (1, 2, 3):
+                errs.append(f"{where}: intensity must be 1, 2 or 3")
+            if not isinstance(sc.get("title"), str) or not sc.get("title", "").strip():
+                if sc.get("title"):
+                    errs.append(f"{where}: title must be nonempty text")
+            if "subtitle" in sc and not isinstance(sc["subtitle"], str):
+                errs.append(f"{where}: subtitle must be text")
+            layers = sc.get("layers", [])
+            if not isinstance(layers, list) or len(layers) > 6:
+                errs.append(f"{where}: layers must be a list of up to six image objects")
+            else:
+                resolved = []
+                for layer in layers:
+                    src = layer.get("src") if isinstance(layer, dict) else None
+                    if not isinstance(src, str) or not src or not is_photo(src):
+                        errs.append(f"{where}: each layer needs a supported image src")
+                    elif not os.path.isfile(src):
+                        warns.append(f"{where}: skipped missing layer '{src}'")
+                    else:
+                        resolved.append(layer)
+                if layers and not resolved:
+                    warns.append(f"{where}: using the geometric sculpture")
+                sc["layers"] = resolved
         if t == "gallery" and isinstance(sc.get("items"), list):
             keep = [it for it in sc["items"] if os.path.exists(norm_clip(it if isinstance(it, str) else it.get("src", ""))["src"])]
             if len(keep) < len(sc["items"]):
@@ -4904,6 +5135,12 @@ def brand_from(src, out_json):
 
 # ----------------------------------------------------------------- v3: templates and storyboard
 TEMPLATES = {
+    "stage3d": {"platform": "reels", "renderer": "web", "direction": "cinematic",
+                "scenes": [
+                    {"type": "stage3d", "title": "מחוץ למסגרת", "subtitle": "תנועה בתלת־ממד"},
+                    {"type": "stage3d", "title": "מכל זווית"},
+                    {"type": "stage3d", "title": "יורדים לפרטים"},
+                    {"type": "cta", "logo": False, "headline": "איזה כיוון נבחר?", "button": "בחרו סגנון", "dur": 4.2}]},
     "property": {"platform": "reels", "theme": {"preset": "gold", "type": "bold", "grade": "bright"},
                  "brand": {"name": "<<business name>>", "phone": "<<phone>>"},
                  "music": {"file": "assets/sfx/music.wav", "volume": 0.85},
@@ -4950,7 +5187,7 @@ def storyboard(scenes, brief, ctx, path):
         _, bpm = detect_beats(y)
     for i, sc in enumerate(scenes):
         copy = " / ".join(str(sc[k]) for k in ("small", "big", "big2", "label", "title", "sub", "place", "kicker", "line", "stamp",
-                                                "tagline", "headline", "button", "eyebrow", "note") if sc.get(k))
+                                                "tagline", "headline", "button", "eyebrow", "note", "subtitle") if sc.get(k))
         if sc.get("lines"):
             copy += " / ".join((l if isinstance(l, str) else l.get("text", "")) for l in sc["lines"])
         if sc.get("items"):
@@ -4958,6 +5195,9 @@ def storyboard(scenes, brief, ctx, path):
         c = sc.get("clip")
         vis = (norm_clip(c)["src"] + (" · " + norm_clip(c).get("move", "") if norm_clip(c).get("move") else "")) if c else \
             (f"{sc.get('device', 'phone')} · ui {sc.get('ui', 'dashboard')}" if sc["type"] == "device" else f"panel ({ctx.bg_style})")
+        if sc["type"] == "stage3d":
+            subject = ", ".join(layer["src"] for layer in sc.get("layers", [])) or "geometric sculpture"
+            vis = f"{sc.get('mode', 'breakout')} · {subject}".replace("|", "/")
         bt = f"{sc['_dur'] * bpm / 60:.1f}" if bpm else "-"
         rows.append(f"| {i} | {sc['_t0']:.2f}s | {sc['_dur']:.2f}s | {bt} | {sc['type']} | {copy.replace('|', '/')} | {vis} | {sc.get('transition')} |")
     total = sum(sc["_dur"] for sc in scenes)
@@ -5010,7 +5250,7 @@ def layout_issues(scenes, ctx):
     return errs, warns
 
 
-def qa(video, brief, scenes, ctx, creative=None, out_prefix=None):
+def qa(video, brief, scenes, ctx, creative=None, out_prefix=None, layout=None):
     """Automatic technical + structural checks with a 0-100 score. The creative part (25 pts) is a reviewer's judgement
     passed in as 5 numbers (hook, clarity, pacing, aesthetics/brand, message/CTA, 0-5 each); it is never auto-filled."""
     rep = {"file": video, "checks": [], "warnings": [], "errors": []}
@@ -5054,12 +5294,12 @@ def qa(video, brief, scenes, ctx, creative=None, out_prefix=None):
     sil = _ff(["-i", video, "-af", "silencedetect=n=-45dB:d=1.0", "-f", "null", "-"])
     silences = re.findall(r"silence_start: ([\d.]+)", sil)
     chk("no silent gaps (>1 s)", not silences, silences[:5], 5)
-    le, lw = layout_issues(scenes, ctx)
+    le, lw = layout if layout is not None else layout_issues(scenes, ctx)
     rep["errors"] += le
     rep["warnings"] += lw
     chk("no text or graphics cut off at the frame edge", not le, len(le), 5)
     first = scenes[0] if scenes else {}
-    chk("hook: first scene is a hook-type scene and <= 3 s", first.get("type") in ("hook", "kinetic", "showcase", "location", "contrast", "counter")
+    chk("hook: first scene is a hook-type scene and <= 3 s", first.get("type") in ("hook", "kinetic", "showcase", "location", "contrast", "counter", "stage3d")
         and first.get("_dur", 9) <= 3.0, f"{first.get('type')} {first.get('_dur', 0):.2f}s", 5)
     last = scenes[-1] if scenes else {}
     chk("ends on a CTA held >= 4 s", last.get("type") == "cta" and last.get("_dur", 0) >= 4.0, f"{last.get('type')} {last.get('_dur', 0):.2f}s", 5)
@@ -5169,7 +5409,7 @@ def selftest(workers=2):
                  {"type": "device", "ui": "flow", "title": "מכשיר", "dur": 1.4},
                  {"type": "contrast", "items": [{"text": "לא", "mark": "x"}, {"text": "כן", "mark": "check"}], "prompt": "בדיקת הקלדה",
                   "caption2": "כיתוב אחרי הסימון", "dur": 1.6},
-                 {"type": "gallery", "items": [{"src": "p0.jpg", "label": "תווית", "tag": "תגית"}, {"src": "v.mp4", "label": "וידאו"}],
+                 {"type": "gallery", "items": [{"src": "p0.jpg", "label": "תווית", "tag": "תגית"}, {"src": "v.mp4", "label": "וידאו", "play": True}],
                   "per": 0.5, "dur": 1.5},
                  {"type": "gallery", "device": "laptop", "items": [{"src": "p1.jpg", "label": "כותרת", "tag": "תגית"}], "dur": 1.0},
                  {"type": "wall", "title": "קיר 3 עבודות", "images": ["p0.jpg", "p1.jpg", "p2.jpg"],
@@ -5177,6 +5417,7 @@ def selftest(workers=2):
                  {"type": "bundle", "items": [{"title": "אחד", "text": "שורה", "image": "p2.jpg", "tags": ["תג"]}, {"title": "שתיים"}], "dur": 1.4},
                  {"type": "logo", "dur": 1.0},
                  {"type": "cta", "headline": "צרו קשר", "dur": 1.6}]}
+    brief["scenes"].insert(-1, {"type": "stage3d", "title": "תלת ממד", "mode": "explode", "dur": 1.0})
     bp = os.path.join(d, "brief.json")
     json.dump(brief, open(bp, "w"), ensure_ascii=False)
     t0 = __import__("time").time()
@@ -5204,7 +5445,7 @@ def selftest(workers=2):
     rep.setdefault("errors", []).extend("fx pass: " + e for e in rfx.get("errors", []))
     print("fx pass:", "ok" if os.path.exists(os.path.join(d, "selftest_fx.mp4")) and not rfx.get("errors") else "FAILED")
     # third pass: the browser renderer ("renderer": "web") on the scene types it draws
-    web_types = ("kinetic", "contrast", "gallery", "wall", "bundle", "logo", "cta")
+    web_types = ("kinetic", "contrast", "gallery", "wall", "bundle", "logo", "stage3d", "cta")
     bw = dict(brief, out="selftest_web.mp4", renderer="web", music_free_version=False,
               scenes=[dict(sc_) for sc_ in brief["scenes"] if sc_["type"] in web_types])
     # with generated narration (offline stand-in voice): scene lines, longer scenes, captions, ducking
@@ -5267,10 +5508,11 @@ def selftest(workers=2):
 
 # ----------------------------------------------------------------- main
 def run(brief_path, out, fmt, draft, workers, preview, frame_at, workdir=None, cleanup=True, creative=None, do_qa=True,
-        plan=False):
+        plan=False, brief=None):
     import time as _time
     t_start = _time.time()
-    brief = load_brief(brief_path)
+    if brief is None:
+        brief = load_brief(brief_path)
     base_dir = os.path.dirname(os.path.abspath(brief_path))
     os.chdir(base_dir)
     errs, warns = validate(brief)
@@ -5356,7 +5598,7 @@ def run(brief_path, out, fmt, draft, workers, preview, frame_at, workdir=None, c
     build_audio(brief, scenes, ctx, wav)
     tmp = stem + ".tmp.mp4"
     subprocess.run([FFMPEG, "-y", "-v", "error", "-i", vid, "-i", wav, "-map", "0:v", "-map", "1:a", "-c:v", "copy",
-                    "-af", "loudnorm=I=-14:TP=-1.5:LRA=11", "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
+                    "-af", MASTER_AUDIO_FILTER, "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
                     "-shortest", "-movflags", "+faststart", tmp], check=True)
     os.replace(tmp, out)
     if brief.get("music_free_version"):
@@ -5394,8 +5636,9 @@ def run(brief_path, out, fmt, draft, workers, preview, frame_at, workdir=None, c
         log(f"[log] could not write the production log: {ex}")
 
 
-def qa_only(brief_path, video, fmt, draft, creative):
-    brief = load_brief(brief_path)
+def qa_only(brief_path, video, fmt, draft, creative, brief=None):
+    if brief is None:
+        brief = load_brief(brief_path)
     os.chdir(os.path.dirname(os.path.abspath(brief_path)))
     validate(brief)
     ctx = Ctx(brief, fmt, draft)
@@ -5404,6 +5647,69 @@ def qa_only(brief_path, video, fmt, draft, creative):
     rep = qa(video, brief, scenes, ctx, creative, stem)
     print(stem + "_qa.md")
     print(json.dumps({k: rep[k] for k in ("auto_points", "score", "creative", "errors", "warnings") if k in rep}, ensure_ascii=False, indent=1))
+
+
+def compare_directions(brief_path, output=None, fmt=None):
+    """Render the same subject four ways as a short, muted motion study."""
+    from pathlib import Path
+    from tempfile import TemporaryDirectory
+
+    path = Path(brief_path).resolve()
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    subject = next((sc for sc in raw.get("scenes", []) if sc.get("type") == "stage3d"), None)
+    if subject is None:
+        raise SystemExit("[compare] choose a brief with a stage3d scene, or start with --new stage3d")
+    target = path.parent / (output or f"{path.stem}_directions.mp4")
+    if target.suffix.lower() != ".mp4":
+        raise SystemExit("[compare] the output must be an .mp4 file")
+    fmt = fmt or raw.get("format") or PLATFORMS.get(raw.get("platform"), ("9x16",))[0]
+    if fmt not in FORMATS:
+        raise SystemExit(f"[compare] unknown format {fmt}")
+    names = list(DIRECTIONS)
+    # Keep authored content and branding. The camera and timing are what this audition changes.
+    shot = {k: v for k, v in subject.items()
+            if k not in ("mode", "intensity", "dur", "beats", "say", "fx", "transition")}
+    sample = {k: raw[k] for k in ("brand", "brand_kit", "platform", "theme", "safe") if k in raw}
+    sample.update(scenes=[dict(shot, dur=3.0)], scale=1 / 3, fps=20, motion_blur=1, sfx=False)
+    renderer = raw.get("renderer", "web")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(prefix=".promo-compare-", dir=target.parent) as temp:
+        tile_paths = []
+        for name in names:
+            b = load_brief(str(path), direction=name, raw=sample)
+            tile = os.path.join(temp, name + ".mp4")
+            log(f"[compare] {name} / {b['scenes'][0]['mode']}")
+            previous_dir = os.getcwd()
+            try:
+                if renderer == "web":
+                    import promo_web
+                    promo_web.run_web(str(path), tile, fmt, False, 1, False, None, do_qa=False, brief=b)
+                else:
+                    run(str(path), tile, fmt, False, 1, False, None, do_qa=False, brief=b)
+            finally:
+                os.chdir(previous_dir)
+            tile_paths.append(tile)
+
+        w, h = (int(n * sample["scale"]) // 2 * 2 for n in FORMATS[fmt])
+        band = 42
+        overlay = Image.new("RGBA", (2 * w, 2 * (h + band)))
+        draw = ImageDraw.Draw(overlay)
+        font = _label_font()
+        for i, name in enumerate(names):
+            draw.text((i % 2 * w + 14, i // 2 * (h + band) + 11), name.upper(), font=font, fill="white")
+        png = os.path.join(temp, "labels.png")
+        overlay.save(png)
+        filters = [f"[{i}:v]pad=iw:ih+{band}:0:{band}:color=0x151619[v{i}]" for i in range(4)]
+        filters += ["[v0][v1][v2][v3]xstack=inputs=4:layout=0_0|w0_0|0_h0|w0_h0[grid]",
+                    "[grid][4:v]overlay=format=auto,format=yuv420p[v]"]
+        args = [FFMPEG, "-y", "-v", "error", "-filter_complex_threads", "1"]
+        for tile in tile_paths:
+            args += ["-i", tile]
+        result = os.path.join(temp, "comparison.mp4")
+        subprocess.run(args + ["-i", png, "-filter_complex", ";".join(filters), "-map", "[v]", "-an",
+                               "-c:v", "libx264", "-crf", "18", "-movflags", "+faststart", result], check=True)
+        os.replace(result, target)
+    print(target)
 
 
 def main():
@@ -5419,6 +5725,9 @@ def main():
     ap.add_argument("--creative", help="reviewer scores 0-5: hook,clarity,pacing,aesthetics,message e.g. 5,4,5,4,5")
     ap.add_argument("--no-qa", action="store_true")
     ap.add_argument("--new", choices=sorted(TEMPLATES), help="print a starter brief")
+    ap.add_argument("--direction", choices=DIRECTIONS, help="override the brief's art direction")
+    ap.add_argument("--list-directions", action="store_true", help="list the available art directions")
+    ap.add_argument("--compare-directions", action="store_true", help="render a four-way moving preview of the first 3D subject")
     ap.add_argument("--brand-from", metavar="DIR", help="extract a brand kit from a website folder/repo")
     ap.add_argument("--kit", default="brand_kit.json", help="output path for --brand-from")
     ap.add_argument("--selftest", action="store_true")
@@ -5426,41 +5735,47 @@ def main():
     ap.add_argument("--workers", type=int, default=max(1, min(4, os.cpu_count() or 2)))
     ap.add_argument("--variant", help="name of a variant in brief['variants'] to apply")
     a = ap.parse_args()
+    if a.list_directions:
+        for name, style in DIRECTIONS.items():
+            print(f"{name:10} {style['description']}")
+        return
     if a.selftest:
         sys.exit(selftest(a.workers))
     if a.history:
         return history()
     if a.new:
-        print(json.dumps(TEMPLATES[a.new], ensure_ascii=False, indent=1))
+        starter = dict(TEMPLATES[a.new])
+        if a.direction:
+            starter["direction"] = a.direction
+        print(json.dumps(starter, ensure_ascii=False, indent=1))
         return
     if a.brand_from:
         brand_from(a.brand_from, a.kit)
         return
     if not a.brief:
         ap.error("a brief.json is required")
+    if a.compare_directions:
+        return compare_directions(a.brief, a.out, a.format)
     creative = [x for x in a.creative.split(",")] if a.creative else None
-    brief = load_brief(a.brief)
+    bp = os.path.abspath(a.brief)
+    with open(bp, encoding="utf-8") as f:
+        raw = json.load(f)
+    brief = load_brief(bp, direction=a.direction, variant=a.variant, raw=raw)
     fmts = [a.format] if a.format else brief.get("formats", [brief.get("format", "9x16")])
     if a.qa:
-        return qa_only(a.brief, os.path.abspath(a.qa), fmts[0], a.draft, creative)
+        return qa_only(bp, os.path.abspath(a.qa), fmts[0], a.draft, creative, brief=brief)
     variants = [None]
     if a.variant:
         variants = [a.variant]
     elif brief.get("variants") and not (a.preview or a.frame is not None or a.plan):
         variants = [None] + [v["name"] for v in brief["variants"]]
-    raw = json.load(open(a.brief, encoding="utf-8"))
     for fmt in fmts:
         for var in variants:
-            bp = os.path.abspath(a.brief)
-            if var:
-                b2 = json.loads(json.dumps(raw))
-                v = next(v for v in raw["variants"] if v["name"] == var)
-                for idx, ov in v.get("scenes", {}).items():
-                    b2["scenes"][int(idx)].update(ov)
-                bp = os.path.join(os.path.dirname(bp), f".brief_{var}.json")
-                json.dump(b2, open(bp, "w"), ensure_ascii=False)
+            resolved = load_brief(bp, direction=a.direction, variant=var, raw=raw)
             out = a.out or brief.get("out", "promo.mp4")
-            stem, ext = os.path.splitext(os.path.abspath(out if os.path.isabs(out) else os.path.join(os.path.dirname(os.path.abspath(a.brief)), out)))
+            stem, ext = os.path.splitext(os.path.join(os.path.dirname(bp), out))
+            if a.direction and not a.out:
+                stem += "_" + a.direction
             if len(fmts) > 1 or fmt != brief.get("format", "9x16"):
                 stem += "_" + fmt
             if a.draft:
@@ -5468,15 +5783,15 @@ def main():
             wd = stem + "_work"
             if var:
                 stem += "_" + var
-            if load_brief(bp).get("renderer") == "web":
+            if resolved.get("renderer") == "web":
                 # the browser renderer (promo_web.py, next to this file): CSS 3D, motion blur, sharp type
                 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
                 import promo_web
                 promo_web.run_web(bp, stem + ext, fmt, a.draft, a.workers, a.preview, a.frame, wd, creative=creative,
-                                  do_qa=not a.no_qa, plan=a.plan)
+                                  do_qa=not a.no_qa, plan=a.plan, brief=resolved)
                 continue
             run(bp, stem + ext, fmt, a.draft, a.workers, a.preview, a.frame, wd, cleanup=len(variants) == 1,
-                creative=creative, do_qa=not a.no_qa, plan=a.plan)
+                creative=creative, do_qa=not a.no_qa, plan=a.plan, brief=resolved)
 
 
 if __name__ == "__main__":

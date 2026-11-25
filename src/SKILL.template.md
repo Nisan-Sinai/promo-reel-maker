@@ -1,11 +1,11 @@
 ---
 name: "promo-reel-maker"
-description: "Make branded, beat-synced promo videos (Reels/TikTok/Shorts/Status ads, YouTube promos) for a business from its clips, photos or website/brand repo: kinetic typography, motion graphics, device mockups, portfolio galleries, proof walls and 3D pop-outs, an optional Chrome renderer for cinematic motion, automatic QA report. Hebrew/RTL first; 9:16 plus 1:1, 4:5, 16:9, up to 4K. Use for סרטון פרסומי, רילס לעסק, סרטון מיתוג, or 'make a video like this'."
+description: "Make branded, beat-synced promo videos (Reels/TikTok/Shorts/Status ads, YouTube promos) for a business from its clips, photos or website/brand repo: kinetic typography, motion graphics, device mockups, playing screen recordings, layered 3D product reveals, breakout, orbit, exploded views and tunnel shots, selectable art direction, automatic QA report. Hebrew/RTL first; 9:16 plus 1:1, 4:5, 16:9, up to 4K. Use for סרטון פרסומי, רילס לעסק, סרטון מיתוג, or 'make a video like this'."
 ---
 
 # Promo Reel Maker
 
-Turns a business's raw clips/photos plus a few facts into a polished 20-40 s ad: kinetic gradient typography, a hook with footage playing *inside* the letters, red "problem" stamps that slam in, a logo reveal with a light sweep, service cards, a photo collage, counting stats, an animated checklist with the clip in a card, testimonial card with stars, before/after wipe, offer badge, and a CTA with a chat button, phone number and a tap animation. Cuts snap to the music's beat; whooshes/impacts/pops are placed automatically; audio is loudness-normalized; a cover image is exported. Everything is driven by one JSON brief and rendered by the bundled engine (Python + Pillow + numpy + ffmpeg), or - for the motion-graphics scenes - by an optional browser renderer that draws every frame in Chrome. Unchanged scenes are cached, so edits and A/B hook variants re-render only what changed.
+Turns a business's raw clips/photos plus a few facts into a polished 20-40 s ad: kinetic gradient typography, a hook with footage playing *inside* the letters, red "problem" stamps that slam in, a logo reveal with a light sweep, service cards, a photo collage, counting stats, an animated checklist with the clip in a card, testimonial card with stars, before/after wipe, offer badge, and a CTA with a chat button, phone number and a tap animation. Cuts snap to the music's beat; whooshes/impacts/pops are placed automatically; audio is loudness-normalized; a cover image is exported. Everything is driven by one JSON brief and rendered by the bundled engine (Python + Pillow + numpy + ffmpeg), or - for the motion-graphics scenes - by an optional browser renderer that draws every frame in Chrome. The classic renderer caches unchanged scenes. The web renderer redraws each frame.
 
 Version 2 adds what the strongest short-form ads do: photos get real camera moves (wide shots pan across instead of being cropped), footage stays bright with soft scrims and boxed caption-style text instead of a dimmed frame, a `showcase` scene for one-feature-per-shot tours, `features` (icon rows on glass), `location` (map-pin drop), a boxed hook, slide / light-leak / blur transitions, colour grades, Reels safe zones and scene lengths set in beats.
 
@@ -18,6 +18,8 @@ Version 3.2 adds motion styles (`fx`). `premium`: smooth, cinematic motion - ele
 Version 4 adds a second renderer, `"renderer": "web"`. The same engine plans the video, snaps it to the beat, mixes the sound, makes the cover and runs QA, but every frame of the motion-graphics scenes (kinetic, title, contrast, gallery, wall, bundle, counter/stat, logo, cta) is drawn by Chrome: real CSS 3D (phones and laptops that turn, cards that lift off the screen), sub-pixel motion with motion blur, sharp type and soft shadows. It is clearly more polished than the classic renderer and is the recommended choice for Formula D. It needs Playwright and a Chrome or Chromium browser in the workspace; when they are missing, or a brief uses a scene type it does not draw yet, the video renders with the classic renderer in the premium style automatically. The classic renderer and every older brief are unchanged.
 
 Version 4.1 adds generated narration: write a line for a scene (`"say"`) and the engine voices the whole script with ElevenLabs or Google's Gemini text-to-speech (both have free tiers), places each line on its scene, makes the scene long enough for it, ducks the music under the voice and shows word-by-word captions - in both renderers. A recorded voiceover still works as before.
+
+Version 5.0.0 adds four switchable directions and a layered 3D stage. Use a camera arc to show how parts overlap, an exploded view to explain an assembly, a breakout to bring a cutout beyond a frame, or a tunnel to travel through successive layers. A web gallery can now play a screen recording inside its moving device and on the pop-out at the same time.
 
 ## 0. Setup (once per session)
 
@@ -39,7 +41,7 @@ python3 -m py_compile ~/.cache/promo-reel/promo_engine.py ~/.cache/promo-reel/pr
    Only if SKILL.md is not readable on disk, write the code blocks in the Engine and Web renderer sections verbatim to those paths (promo_web.py must sit next to promo_engine.py). If py_compile reports an error, fix that line.
 2. Check tools: `ffmpeg -version`, `python3 -c "import numpy, PIL; from PIL import features; print(features.check('raqm'))"`. If raqm is False: `pip install python-bidi --break-system-packages` (needed for correct Hebrew order). scipy is optional (only for synthesized fallback SFX); `qrcode` only if a QR is wanted.
 3. Fonts (Rubik, Heebo, Secular One, Frank Ruhl, Assistant, Rubik Dirt, Suez One, Karantina, Fredoka, Varela Round, Noto Sans Hebrew, Geist, Geist Mono) download automatically from Google Fonts on GitHub into ~/.cache/promo_fonts; if blocked, the engine falls back to local Hebrew fonts.
-4. Web renderer (needed only for `"renderer": "web"`): `python3 -c "import playwright" 2>/dev/null || pip install playwright --break-system-packages`, then `python3 ~/.cache/promo-reel/promo_web.py --check`. It uses a system Chrome (`/usr/bin/google-chrome`, Chromium, or the path in the `CHROME` environment variable). If it reports that no browser could start, try `python3 -m playwright install chromium` once; if the download is blocked, carry on - briefs with `"renderer": "web"` then render with the classic renderer in the premium style, and tell the user the video used the fallback.
+4. Web renderer (for web briefs, including the default 3D stage): `python3 -c "import playwright" 2>/dev/null || pip install playwright --break-system-packages`, then `python3 ~/.cache/promo-reel/promo_web.py --check`. It uses a system Chrome (`/usr/bin/google-chrome`, Chromium, or the path in the `CHROME` environment variable). If it reports that no browser could start, try `python3 -m playwright install chromium` once; if the download is blocked, carry on - briefs with `"renderer": "web"` then render with the classic renderer in the premium style, and tell the user the video used the fallback.
 5. Narration (needed only for generated narration, section 4b): an API key for the engine the brief uses. ElevenLabs: elevenlabs.io > Developers > API keys (a free account; a restricted key with Text to Speech access and Voices read is enough), read from `ELEVENLABS_API_KEY` or `~/.config/promo-reel/elevenlabs_key`. Gemini: aistudio.google.com > Get API key (free, no credit card), read from `GEMINI_API_KEY` or `~/.config/promo-reel/gemini_key`. When the user gives a key in the conversation, or asks Claude to create one in their signed-in browser, write it to that file (`mkdir -p ~/.config/promo-reel && chmod 700 ~/.config/promo-reel`, then the file with mode 600) and never put it in a brief, a log, a commit, memory or a reply. The workspace must be allowed to reach `api.elevenlabs.io` / `generativelanguage.googleapis.com`; if the engine reports that the network blocks it, ask the user to add the domain under claude.ai/settings/capabilities > Create and edit files > Allowed websites > Manage - Claude does not change network settings itself.
 6. Optional (about 1-2 minutes): `python3 $E --selftest` renders every scene type from synthetic media at draft size three times - as is, with `fx` energy 3 (every transition, camera hits, pop-outs), and with the web renderer (skipped, with the reason, when Chrome is not available) - and runs QA on each. The fx pass and the web pass also voice scene lines with an offline stand-in voice (no key needed) to check narration timing and captions, including captions on frames the camera moves. It must print `fx pass: ok`, `web pass: ok` (or `skipped`) and `SELFTEST PASS` (the short test CTA is expected to miss the 4 s rule). Run it after any change to the engine.
 
@@ -59,17 +61,17 @@ If the user sends a reference video ("make one like this"): analyze it first - c
 
 Write a short `creative_plan.md` in the project folder (it is a working file, not a deliverable):
 1. Goal (leads, bookings, awareness), audience, platform and length.
-2. Two or three distinct concepts, each as a table row: concept, the hook in the first 2.5 s, strengths, weaknesses. Different concepts differ in the opening and the story arc, not just in colours.
-3. Pick one and say why in two sentences (hook strength for muted viewers, clarity, what real assets exist).
-4. The script and timeline: scene, time, on-screen copy - from the formulas in section 2.
+2. Sketch two or three possible openings. For each, name the first thing the viewer sees, the action or change they will witness, and the source file and time (or exact layers) that support it.
+3. Choose an opening and a direction that suit the user's words and available assets. For a repeat request such as “מחר משהו אחר”, keep the recognizable product or brand detail and change the point of view and the rhythm. Use the prior direction when available in the conversation or previous brief.
+4. Write the timeline around that action. Lead the viewer's eye into the next shot with the same shape, position or movement. Give the result time to register and end with one clear action. Use the formulas in section 2 as starting points.
 Then write the brief and run `python3 $E brief.json --plan`: it prints the beat-snapped plan, writes `<out>_storyboard.md` (time, length, beats, copy, visual and transition per scene) and checks every text/graphic element against the frame edges and the platform's safe band - without rendering. Fix any layout error before previewing. Show the plan and storyboard to the user only if they want to approve copy first; never present a plan, storyboard or still frames as if they were the finished video.
 
 ## 2. Write the script
 
-What the strongest short-form ads have in common (research, Nov 2026):
-- The first 1.5-3 s decide reach. Open on the single best visual, bright and already moving, with the hook text on screen by 0.3 s. No logo intro, no black frames, no slow fade-in.
-- Most people watch muted: every scene carries its message in on-screen text short enough to read at a glance.
-- 15-30 s gets the best completion. One idea per shot, about 2-4 beats each, every cut on a beat.
+When writing a short-form ad, use the intended platform and the actual viewing experience to set the pace.
+- Open on a legible action or result in the first 1.5-3 s. A logo reveal works as an opening when the reveal itself is the subject.
+- Watch the opening muted. Use short on-screen copy where the action needs context.
+- For a 15-30 s ad, plan one idea per shot. Build towards a single accented moment. Shorten the approach, leave room for a pause, and let the viewer read the result on the next hold.
 - Sell the experience, not a listing: the view, coffee on the balcony, the bed - one feature per shot with a 1-3 word label.
 - Keep text in the safe band: the Reels/TikTok interface covers roughly the top 13% and bottom 24% (ads: bottom 35%).
 - End on one clear action (WhatsApp/phone), held long enough to read.
@@ -158,6 +160,41 @@ Set `"platform"` and the engine picks the format, the safe band and the length c
 
 Resolution: 1080 wide by default (1080x1920 for 9:16, 1920x1080 for 16:9). `"scale": 2` renders 4K (2160x3840 / 3840x2160) with vector-sharp text; it takes about 4 times as long, so render 4K only when it is asked for, after the 1080 version is approved.
 
+### 2b. Choose a direction and a 3D shot
+
+`direction` sets defaults for the whole brief. `stage3d.mode` chooses a camera move for one scene. A request for “the same product, a different film” can change the first field while keeping the source images, copy and brand. Set a scene's mode, intensity, transition or duration explicitly when that decision should carry through every direction.
+
+| What the user asks for | Direction to try | A shot to design |
+|---|---|---|
+| “יוקרתי, שיגלו את המוצר לאט” | `cinematic` | Ease around the silhouette, reveal the detail, hold on it |
+| “כמו שער מגזין” | `editorial` | Begin with a tight crop and cut to the full object framed by a short headline |
+| “שיקפוץ מהמסך” | `arcade` | Keep the frame visible as a part crosses it and place one sound on the reveal |
+| “תראה איך זה בנוי” | `showroom` | Separate the actual parts, hold on the gap, then show the product together |
+
+Start a new brief with `python3 $E --new stage3d > brief.json`. Use `python3 $E --list-directions` to see the available directions. To audition a second direction on the same brief, run `python3 $E brief.json --direction editorial --draft --out editorial.mp4`. Choose a different output name for each take. Leave the scene fields you want the direction to choose out of the brief. Explicit CLI directions add a direction suffix when the output name is omitted. Brand colours supplied in the brief or brand kit take priority over direction defaults. The starter and briefs containing a stage3d scene select the web renderer by default, unless the brief explicitly selects classic.
+
+Use `"renderer": "web"` for the CSS 3D stage. Put each visible piece on its own transparent PNG, preserving its position on the same square canvas. List the images from back to front. For example, a camera body sits behind its lens housing, which sits behind the glass. The lens can then cross the outer frame while its shadow and the overlap tell the viewer how far forward it moved. A single flat photo gives one flat plane. For a logo reveal, its transparent silhouette alone can work well. Without layer images, the stage builds a geometric sculpture in the brand colours. The classic fallback animates the same assets and title with simpler perspective and lighting.
+
+```json
+{
+  "renderer": "web",
+  "direction": "cinematic",
+  "scenes": [{
+    "type": "stage3d",
+    "mode": "breakout",
+    "title": "מחוץ למסגרת",
+    "intensity": 2,
+    "dur": 3,
+    "layers": [
+      {"src": "assets/body.png"},
+      {"src": "assets/lens.png"}
+    ]
+  }]
+}
+```
+
+For a product *action*, a screen recording often gives better proof than a layered still. Use a web `gallery` item such as `{"src":{"src":"assets/order.mp4","start":1.2},"play":true,"label":"אישור הזמנה"}`. A pop-out from that item follows the same frame as the device screen. Set `"play_videos": true` on a gallery to enable playback across its video items, or `"play": false` on an item for a poster. Playback starts at source time zero unless a start time is specified and holds the last frame if the clip ends first.
+
 ### 2c. Motion style and renderer
 
 Two independent choices, both optional:
@@ -172,7 +209,7 @@ Two independent choices, both optional:
 Hype levels: 1 - a zoom punch, camera shake and a brief colour split on every cut and impact sound; 2 - level 1 stronger, a punch on every beat, glitch bands on hits, light streaks and a ring burst on brand backgrounds, elements that slam in with a motion trail and keep bouncing to the beat, transitions rotated through cube, zoom_blur, slices, spin, shape, whip, diamond and glitch, a thump under each cut; 3 - level 2 at full strength with a white flash on hits. A calm scene can opt out with `"fx": false`. Feedback from real use: viewers read hype as amateurish when it runs for a whole ad - prefer premium (or the web renderer) for brands, and use hype only when the user asks for it.
 
 Web renderer details:
-- Draws: kinetic, title, contrast, gallery (phone or laptop, with pop-outs), wall, bundle, counter / stat / stats, logo, cta, plus narration and voiceover captions (word by word, the spoken word in the theme colour). Any other scene type sends the whole brief to the classic renderer (premium style) with a log line saying why - mixing renderers inside one video is not supported.
+- Draws: kinetic, title, contrast, gallery (phone or laptop, with pop-outs), stage3d, wall, bundle, counter / stat / stats, logo, cta, plus narration and voiceover captions (word by word, the spoken word in the theme colour). Any other scene type sends the whole brief to the classic renderer (premium style) with a log line saying why - mixing renderers inside one video is not supported.
 - Transitions: push, push_up, zoom_through, cube, shape, diamond, fade, blur, flash, cut; the classic names map onto them (zoom, punch, spin, glitch → zoom_through; whip, slide → push; slide_up, slices → push_up; leak → fade).
 - Top-level fields: `motion_blur` (samples per frame, 4; 1 with `--draft`; only moving frames take extra samples), `shutter` (0.5 of a frame).
 - Same commands as the classic renderer (`--plan`, `--preview`, `--frame`, `--draft`, `--qa`), same QA, cover and music-free version. Pop-outs are kept inside the frame automatically (a too-large `scale` is reduced). It has no scene cache: every full render redraws every frame, so look at `--frame` stills first.
@@ -267,12 +304,15 @@ Free tiers: both engines' free tiers have monthly or daily limits, the takes are
 
 ## 5. Brief, preview, render, QA
 
-Write `brief.json` (reference below; starters: `python3 $E --new property|service|tech > brief.json`, then replace every `<<...>>`), then:
+Write `brief.json` using the reference below or generate a starter with `--new property`, `--new service`, `--new tech` or `--new stage3d`. Replace any `<<...>>` placeholders before rendering.
+
 - `python3 $E brief.json --plan` - storyboard + layout check, no render (section 1b).
 - `python3 $E brief.json --preview --draft` - contact sheet of every scene (2 frames each) at half size, a few seconds. Look at it.
 - `python3 $E brief.json --frame 1.2,9,15,21,31` - full-size PNGs at those seconds; look at the busiest moments (hook, cards, device, CTA) before the full render. Check: Hebrew reads in order, no single word alone on a line, nothing touches the frame edge, text is outside the platform's UI zones.
 - `python3 $E brief.json` - final MP4 + `<out>_cover.jpg`, then automatic QA. About 1 minute per 30 s of 1080x1920 on 2 cores with the classic renderer (about 2.5 minutes with hype energy 2, 5-6 minutes with the web renderer); run it in the foreground with a long timeout. The plan printed first shows each scene's start, length, transition and clip.
-- Edits: change the brief and run again - only scenes whose content changed re-render (cache in `<out>_work/`, keyed by scene content, clip file contents, theme and engine version). A scene's cache also depends on the scene before it (transitions blend from its last frame). `--draft` writes separate `_draft` files. After editing the engine itself, delete `<out>_work/` so no stale scene is reused.
+- Classic renderer edits: change the brief and run again - only scenes whose content changed re-render (cache in `<out>_work/`, keyed by scene content, clip file contents, theme and engine version). A scene's cache also depends on the scene before it (transitions blend from its last frame). `--draft` writes separate `_draft` files. After editing the engine itself, delete `<out>_work/` so no stale scene is reused.
+
+For a moving 3D hero, play one draft at phone size before the final render. Check the instant just before the frame crossing, the peak separation and the settling pose. Make sure the silhouette reads, the layers stay registered when assembled, and captions leave the action visible. Watch the opening muted, then listen once for the accent and the voice. For a quick choice of style, `python3 $E brief.json --compare-directions --out looks.mp4` makes a short muted 2×2 film from the first stage3d scene. Its four panels reuse the subject, words and brand, each with its own default camera, intensity and any unspecified colours. The input brief stays intact. For briefs with no stage3d scene, use the stage3d starter or compare normal draft renders. When the user wants a choice between openings, render two or three short draft MP4s built from the opening scene(s). Keep the rest of the brief and the final cut for the chosen opening. For a single requested film, one selected moving draft is enough.
 
 Automatic QA (written after every render unless `--no-qa` or `"qa": false`; run it alone with `python3 $E brief.json --qa out.mp4`): `<out>_qa.md`, `<out>_qa.json` and `<out>_qa_sheet.jpg` (1 frame per second).
 
@@ -408,7 +448,8 @@ Top-level fields:
 - `music`: `file, start, volume (0.8), beat_sync (true)`. `voiceover`: `file, at, volume, text, captions (true), words_per_caption, caption_chars, caption_size, caption_y, duck (0.7 = how far the music dips under the voice), tts {engine (gemini) | elevenlabs, voice (Puck for Gemini), style, rate (1.0), model (auto), key_file, per_line}, lead (0.15), tail (0.35)` - music ducks under it; `text` turns on captions (section 4); `tts` generates the voice (section 4b). Scene fields `say` (the scene's spoken line) and `say_at` (seconds after the cut).
 - `sfx`: true | false | {name: path or {file, sync, max, gain}}; `sfx_volume` (0.55).
 - `variants`: [{name, scenes: {"<index in scenes>": {overrides}}}] - extra outputs `<out>_<name>.mp4` sharing the cache.
-- `renderer`: classic (default) | web - which renderer draws the frames (section 2c); `motion_blur` (4), `shutter` (0.5) for the web renderer.
+- `direction` (optional): cinematic | editorial | arcade | showroom. Applies defaults to fields left open in the brief. Select another with the CLI option `--direction NAME`.
+- `renderer`: classic | web - which renderer draws the frames (section 2c). A stage3d brief defaults to web. Other briefs default to classic. Use `motion_blur` (4), `shutter` (0.5) for the web renderer.
 - `fx`: {"style": "premium"} | {"energy": 0-3} | "premium" | "low" | "high" | "crazy" - motion style (section 2c); a scene can set `"fx": false` to stay calm.
 - `qa` (true): run QA after rendering; `cover_scene` (0): which scene the cover image is taken from; `music_free_version` (false): also write `<out>_no_music.mp4`.
 
@@ -439,7 +480,8 @@ Every scene accepts: `dur` or `beats` (length in music beats; needs music), `tra
 | text | lines [str or {text, style small\|body\|big\|accent, anim, size}], clip | 2.0 | punch |
 | cta | eyebrow, eyebrow_size (46), headline, headline_size (92), button (text or false), button_style cta\|primary (cta = the theme's cta colour), button_icon (true = chat icon; false = centered text pill), phone, website, qr (url), logo (true), tap_at, clip | 5.0 | zoom |
 | contrast | items [{text, mark x\|check, size (76 ✕ / 90 ✓)}], per (0.55), start (0.15), prompt (chat bar that types it), prompt_at, cps (14 characters/s), caption (shown until the ✓), caption2 (from the ✓; alone it appears with the ✓), highlight (words), caption_size (46), clip | start + per × items + 1.4, longer with a prompt | blur |
-| gallery | items [{src (image or clip spec), label, tag, icon, highlight}], per (0.7), kicker, device phone\|laptop, device_scale (1), swing (9), label_style pill\|headline (headline: laptop in portrait), label_size (72), pop true\|alternate\|false (item `pop`: true\|false\|{box [x0, y0, x1, y1] as fractions of the screenshot, radius (fraction of its width), scale (1.35 premium / 1.8 hype), at}), clip | 0.45 + per × items + 0.6 | zoom |
+| gallery | items [{src (image or clip spec), play (web), label, tag, icon, highlight}], play_videos (web, false), per (0.7), kicker, device phone\|laptop, device_scale (1), swing (9), label_style pill\|headline (headline: laptop in portrait), label_size (72), pop true\|alternate\|false (item `pop`: true\|false\|{box [x0, y0, x1, y1] as fractions of the screenshot, radius (fraction of its width), scale (1.35 premium / 1.8 hype), at}), clip | 0.45 + per × items + 0.6 | zoom |
+| stage3d | title (required), subtitle, mode breakout (default)\|orbit\|explode\|tunnel, intensity 1/2/3 (default 2), layers (optional, 1-6 images with `src`, back to front), dur | 3.0 or direction | cut or direction |
 | wall | images, cols (6), rows (5), tile_w (0.27 of width), tile_ratio (tile height/width, 1.9), wall_dim (0.6), wall_ry (-14), wall_rx (32), title, title_size (96), title_highlight (default: numbers), sub, quotes [{text, highlight, who, label, size}], quote_label, quotes_at (0.9), per_quote (1.9) | max(3, quotes_at + per_quote × quotes + 0.6) | blur |
 | bundle | items [{title, text, image, tags [text or {text, icon}], size (66)}] (up to 3), title, title_size (90), clip | 0.2 + 0.55 × items + 2.2 | slide_up |
 
@@ -447,7 +489,7 @@ Transitions: cut, flash, punch, fade, zoom, whip, slide, slide_up, glitch, blur,
 Icons (label, place, features, cards): pin, people, bed, view, waves, pool, star, sparkle, check, home, snow (air conditioning), wifi, parking, sun, heart, calendar, chat, phone, key, book, kitchen, coffee, clock, web, cart, layers, bolt, gear, code, chip, chart, rocket, search, lock. An unknown icon falls back to check (with a warning).
 Outputs: `<out>.mp4`, `<out>_cover.jpg`, `<out>_qa.md/.json`, `<out>_qa_sheet.jpg`, `<out>_storyboard.md` (`--plan`), `<out>_preview.jpg`, `<out>_frame_<t>.png`, `<out>_work/` (cache + plan.json with final timings).
 
-Command line: `python3 $E [brief.json] [--out FILE] [--format F] [--draft] [--preview] [--frame T,T] [--plan] [--qa VIDEO] [--creative h,c,p,a,m] [--no-qa] [--variant NAME] [--workers N] | --new property|service|tech | --brand-from DIR [--kit FILE] | --selftest | --history`.
+Command line: `python3 $E [brief.json] [--out FILE] [--format F] [--draft] [--preview] [--frame T,T] [--plan] [--qa VIDEO] [--creative h,c,p,a,m] [--no-qa] [--variant NAME] [--direction NAME] [--compare-directions] [--workers N] | --new property|service|tech|stage3d | --list-directions | --brand-from DIR [--kit FILE] | --selftest | --history`.
 
 ## Troubleshooting
 
